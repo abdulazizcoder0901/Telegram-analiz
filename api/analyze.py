@@ -89,11 +89,15 @@ def admin_data(channel: str, min_fetched: float) -> dict | None:
                 store_error = f"Tarixni saqlab bo'lmadi: {exc}"
         entry = {"fetched": time.time(), "raw": raw, "series": history.merge(stored, fresh),
                  "error": store_error, "stored": bool(store)}
+        print(f"[admin] ok: telegram {len(fresh)} kun, saqlangan {len(stored)} kun, "
+              f"obunachilar {(raw.get('followers') or {}).get('current')}, baza {'bor' if store else 'yoq'}"
+              + (f", baza xatosi: {store_error}" if store_error else ""), flush=True)
     except Exception as exc:  # noqa: BLE001 — statistika xatosi dashboardni to'xtatmasin
         previous = entry or {}
         entry = {"fetched": time.time(), "raw": previous.get("raw"),
                  "series": history.merge(stored, previous.get("series") or {}),
                  "error": f"Telegram statistikasini olib bo'lmadi: {exc}", "stored": bool(store)}
+        print(f"[admin] xato: {type(exc).__name__}: {exc}", flush=True)
     _ADMIN[channel] = entry
     return entry
 
