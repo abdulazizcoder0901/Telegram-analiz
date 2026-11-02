@@ -206,10 +206,10 @@ def _post_rows(posts: list[dict[str, Any]]) -> list[list[Any]]:
 
 CSS = """
 /* Layout: bir ustunli hisobot — avval KPI va tavsiyalar, keyin grafiklar, oxirida tafsilotlar. */
-:root{--bg:#f4f6f9;--card:#ffffff;--fg:#17202b;--muted:#5e6b7a;--line:#dfe5ec;--accent:#2b7bd6;--chip:#e9f1fb;--good:#1f8a5b;--warn:#b7791f;
+:root{--bg:#f4f6f9;--card:#ffffff;--fg:#17202b;--muted:#5e6b7a;--line:#dfe5ec;--accent:#2b7bd6;--on-accent:#ffffff;--chip:#e9f1fb;--good:#1f8a5b;--bad:#c8463b;--warn:#b7791f;
 --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--font-num:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#11161d;--card:#18202a;--fg:#e6ebf1;--muted:#93a1b1;--line:#28323e;--accent:#5ea4f0;--chip:#1d2b3b;--good:#4cc38a;--warn:#e0a84a;color-scheme:dark}}
-:root[data-theme="dark"]{--bg:#11161d;--card:#18202a;--fg:#e6ebf1;--muted:#93a1b1;--line:#28323e;--accent:#5ea4f0;--chip:#1d2b3b;--good:#4cc38a;--warn:#e0a84a;color-scheme:dark}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#11161d;--card:#18202a;--fg:#e6ebf1;--muted:#93a1b1;--line:#28323e;--accent:#5ea4f0;--on-accent:#0b1420;--chip:#1d2b3b;--good:#4cc38a;--bad:#ef7a6f;--warn:#e0a84a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#11161d;--card:#18202a;--fg:#e6ebf1;--muted:#93a1b1;--line:#28323e;--accent:#5ea4f0;--on-accent:#0b1420;--chip:#1d2b3b;--good:#4cc38a;--bad:#ef7a6f;--warn:#e0a84a;color-scheme:dark}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 var(--font-body)}
 main{max-width:1080px;margin:0 auto;padding-block:28px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 h1{font-size:28px;line-height:1.2;margin:0 0 4px;text-wrap:balance}h2{font-size:16px;margin:0 0 12px;text-wrap:balance}
@@ -226,105 +226,145 @@ a{color:var(--accent);text-decoration:none}a:hover,a:focus-visible{text-decorati
 .tips{border-color:var(--accent)}ul.tips-list{margin:0;padding-left:20px;max-width:75ch}ul.tips-list li{margin:7px 0}
 .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}.two .card{margin:0}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
-.filters{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--card);border:1px solid var(--line);border-radius:10px;
-padding:12px 14px;margin:0 0 20px;box-shadow:0 6px 18px -14px rgba(0,0,0,.35)}
-.f-row{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end}
-.f{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 140px}
-.f label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
-.f select,.f input{font:500 14px var(--font-body);padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--fg);width:100%;min-width:0}
-.f-actions{flex:0 0 auto;flex-direction:row;align-items:center;gap:12px}
-.f-actions button{font:600 14px var(--font-body);padding:9px 16px;border:0;border-radius:7px;background:var(--accent);color:var(--card);cursor:pointer}
-.f-actions button[disabled]{opacity:.7;cursor:progress}
-.f select:focus-visible,.f input:focus-visible,.f-actions button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.f-actions a{font-size:14px}
-.f-summary{margin:10px 0 0;font-size:13px;color:var(--muted)}.f-summary b{color:var(--fg);font-family:var(--font-num)}
-.f-warn{margin:8px 0 0;font-size:13px;color:var(--warn)}
-@media (max-width:560px){.filters{position:static}.f{flex-basis:calc(50% - 6px)}.f-actions{flex-basis:100%}}
+.tb{display:grid;gap:14px;margin:0 0 22px}
+.tb-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.tb-top h1{font-size:26px;margin:0}
+.btn-ghost{display:inline-flex;align-items:center;gap:6px;font:600 14px var(--font-body);padding:8px 14px;border:1px solid var(--line);border-radius:999px;color:var(--fg);background:var(--card)}
+.btn-ghost:hover{border-color:var(--accent);text-decoration:none}
+.tb-meta{display:flex;flex-wrap:wrap;gap:6px 22px;font-size:14px;color:var(--muted);margin:0}
+.tb-meta b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);margin-right:6px;vertical-align:1px}
+.pills{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:10px}
+.pill{display:flex;align-items:center;justify-content:center;min-height:44px;padding:8px 12px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--fg);font-weight:500;text-align:center}
+.pill:hover{border-color:var(--accent);text-decoration:none}
+.pill.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.pill.shift{border-style:dashed;color:var(--muted);grid-column:span 2}
+.pill.off{opacity:.45;pointer-events:none}
+.tb-row{display:grid;grid-template-columns:minmax(150px,1.3fr) minmax(130px,1fr) auto minmax(130px,1fr) minmax(150px,1fr) auto;gap:10px;align-items:center}
+.tb-row select,.tb-row input{font:500 15px var(--font-body);padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);width:100%;min-width:0}
+.tb-row .dash{color:var(--muted)}
+.tb-row button{font:600 15px var(--font-body);padding:10px 22px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);cursor:pointer}
+.tb-row button:hover{border-color:var(--accent)}.tb-row button[disabled]{opacity:.6;cursor:progress}
+.tb select:focus-visible,.tb input:focus-visible,.tb button:focus-visible,.pill:focus-visible,.btn-ghost:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tb-warn{margin:0;font-size:13px;color:var(--warn)}
+@media (max-width:760px){.tb-row{grid-template-columns:1fr 1fr}.tb-row .dash{display:none}.tb-row .wide{grid-column:1/-1}.pill.shift{grid-column:1/-1}}
+.kpi .d{font:500 12px var(--font-num);margin-top:4px;color:var(--muted)}.kpi .d.up{color:var(--good)}.kpi .d.down{color:var(--bad)}
 """
 
 
-def render_filter_bar(
+def render_toolbar(
     *,
+    title: str,
     action: str,
-    hidden: dict[str, str],
+    base: dict[str, str],
     filters: Any,
     today: Any,
     type_options: list[tuple[str, str, int]],
-    limit: int | None = None,
-    limit_choices: tuple[int, ...] = (100, 300, 600),
-    shown: int | None = None,
-    total: int | None = None,
-    warning: str | None = None,
+    months: list[tuple[str, str]],
+    meta: list[str],
+    refresh_href: str,
+    warnings: list[str] | None = None,
 ) -> str:
-    """Hisobot tepasidagi filtrlar formasi (GET bilan serverga yuboriladi)."""
-    from .filters import PERIODS
+    """Yandex Direct dashboardidagi kabi panel: sarlavha, holat qatori, tayyor davrlar, sana/oy/tur."""
+    from urllib.parse import urlencode
+
+    from .filters import PRESETS, shift_month
 
     esc = html.escape
-    period_opts = "".join(
-        f"<option value='{k}'{' selected' if filters.period == k else ''}>{esc(label)}</option>"
-        for k, (label, _) in PERIODS.items()
+
+    def href(**params) -> str:
+        q = dict(base)
+        if filters.types:
+            q["type"] = filters.types[0]
+        q.update({k: v for k, v in params.items() if v})
+        return f"{action}?{urlencode(q)}"
+
+    start, end = filters.bounds(today)
+    pills = [
+        f"<a class='pill{' on' if filters.preset == key else ''}' href='{esc(href(preset=key))}'>{esc(label)}</a>"
+        for key, label in PRESETS
+    ]
+    if start and end:
+        prev_from, prev_to = shift_month(start), shift_month(end)
+        pills.append(f"<a class='pill shift' href='{esc(href(**{'from': str(prev_from), 'to': str(prev_to)}))}'>"
+                     "← O'tgan oyda shu sana</a>")
+    else:
+        pills.append("<span class='pill shift off'>← O'tgan oyda shu sana</span>")
+
+    current_month = f"{filters.month[0]}-{filters.month[1]:02d}" if filters.month else ""
+    month_opts = "<option value=''>Oyni tanlang</option>" + "".join(
+        f"<option value='{v}'{' selected' if v == current_month else ''}>{esc(label)}</option>" for v, label in months
     )
     selected_type = filters.types[0] if filters.types else "all"
     type_opts = f"<option value='all'{' selected' if selected_type == 'all' else ''}>Barcha turlar</option>" + "".join(
         f"<option value='{esc(k)}'{' selected' if k == selected_type else ''}>{esc(label)} ({n})</option>"
         for k, label, n in type_options
     )
-    start, end = filters.bounds(today)
-    fields = [
-        f"<div class='f'><label for='f-period'>Davr</label><select id='f-period' name='period'>{period_opts}</select></div>",
-        f"<div class='f'><label for='f-from'>Dan</label><input id='f-from' type='date' name='from' value='{start or ''}'></div>",
-        f"<div class='f'><label for='f-to'>Gacha</label><input id='f-to' type='date' name='to' value='{end or ''}'></div>",
-        f"<div class='f'><label for='f-type'>Post turi</label><select id='f-type' name='type'>{type_opts}</select></div>",
-    ]
-    if limit is not None:
-        limit_opts = "".join(
-            f"<option value='{n}'{' selected' if n == limit else ''}>oxirgi {n}</option>" for n in limit_choices
-        )
-        fields.append(
-            f"<div class='f'><label for='f-limit'>Yig'iladigan postlar</label><select id='f-limit' name='limit'>{limit_opts}</select></div>"
-        )
-    hidden_html = "".join(f"<input type='hidden' name='{esc(k)}' value='{esc(v)}'>" for k, v in hidden.items())
-    reset_q = "&".join(f"{esc(k)}={esc(v)}" for k, v in hidden.items())
-    summary = ""
-    if shown is not None and total is not None:
-        desc = " · ".join(filters.describe(today)) or "filtrsiz"
-        summary = f"<p class='f-summary'><b>{shown}</b> / {total} post · {esc(desc)}</p>"
-    warn = f"<p class='f-warn'>{esc(warning)}</p>" if warning else ""
-    script = (
-        "<script>(function(){var f=document.getElementById('filters');if(!f)return;"
-        "var p=f.querySelector('#f-period'),a=f.querySelector('#f-from'),b=f.querySelector('#f-to');"
-        "p.addEventListener('change',function(){if(p.value!=='custom'){a.value='';b.value='';}f.requestSubmit();});"
-        "[a,b].forEach(function(x){x.addEventListener('change',function(){p.value='custom';});});"
-        "f.querySelectorAll('#f-type,#f-limit').forEach(function(x){x.addEventListener('change',function(){f.requestSubmit();});});"
-        "f.addEventListener('submit',function(){if(p.value!=='custom'){a.disabled=true;b.disabled=true;}"
-        "var btn=f.querySelector('button');btn.disabled=true;btn.textContent='Yuklanmoqda…';});"
-        "window.addEventListener('pageshow',function(){a.disabled=false;b.disabled=false;"
-        "var btn=f.querySelector('button');btn.disabled=false;btn.textContent='Qo‘llash';});})();</script>"
+    hidden = "".join(f"<input type='hidden' name='{esc(k)}' value='{esc(v)}'>" for k, v in base.items())
+    if filters.preset:
+        hidden += f"<input type='hidden' name='preset' value='{esc(filters.preset)}' id='t-preset'>"
+    form = (
+        f"<form id='tb-form' class='tb-row' method='get' action='{esc(action)}'>{hidden}"
+        f"<select id='t-month' name='month' aria-label='Oy' class='wide'>{month_opts}</select>"
+        f"<input id='t-from' type='date' name='from' value='{start or ''}' aria-label='Boshlanish sanasi'>"
+        "<span class='dash'>—</span>"
+        f"<input id='t-to' type='date' name='to' value='{end or ''}' aria-label='Tugash sanasi'>"
+        f"<select id='t-type' name='type' aria-label='Post turi'>{type_opts}</select>"
+        "<button type='submit'>Ko'rsatish</button></form>"
     )
+    warn = "".join(f"<p class='tb-warn'>{esc(w)}</p>" for w in warnings or [])
+    script = """<script>(function(){
+var f=document.getElementById('tb-form');if(!f)return;
+var a=f.querySelector('#t-from'),b=f.querySelector('#t-to'),m=f.querySelector('#t-month'),
+    p=f.querySelector('#t-preset'),dirty=false,monthPicked=false;
+[a,b].forEach(function(x){x.addEventListener('change',function(){dirty=true;});});
+m.addEventListener('change',function(){if(!m.value)return;monthPicked=true;f.requestSubmit();});
+f.querySelector('#t-type').addEventListener('change',function(){f.requestSubmit();});
+f.addEventListener('submit',function(){
+  if(monthPicked){a.disabled=b.disabled=true;if(p)p.disabled=true;}
+  else if(dirty){m.disabled=true;if(p)p.disabled=true;}
+  else{a.disabled=b.disabled=true;}
+  var btn=f.querySelector('button');btn.disabled=true;btn.textContent='Yuklanmoqda…';});
+window.addEventListener('pageshow',function(){a.disabled=b.disabled=m.disabled=false;if(p)p.disabled=false;
+  var btn=f.querySelector('button');btn.disabled=false;btn.textContent="Ko'rsatish";});
+function ago(){document.querySelectorAll('[data-ago]').forEach(function(el){
+  var min=Math.floor((Date.now()/1000-+el.dataset.ago)/60);
+  el.textContent=min<1?'hozirgina':min<60?min+' daqiqa oldin':Math.floor(min/60)+' soat oldin';});}
+ago();setInterval(ago,30000);
+var r=document.getElementById('tb-refresh');
+if(r)r.addEventListener('click',function(){var u=new URL(r.href,location.href);
+  u.searchParams.set('refresh',Date.now());r.href=u.pathname+u.search;});
+})();</script>"""
     return (
-        f"<form id='filters' class='filters' method='get' action='{esc(action)}'>{hidden_html}"
-        f"<div class='f-row'>{''.join(fields)}"
-        f"<div class='f f-actions'><button type='submit'>Qo‘llash</button>"
-        f"<a href='{esc(action)}?{reset_q}'>Tozalash</a></div></div>{summary}{warn}</form>{script}"
+        "<header class='tb'>"
+        f"<div class='tb-top'><h1>{esc(title)}</h1>"
+        f"<a id='tb-refresh' class='btn-ghost' href='{esc(refresh_href)}'>↻ Yangilash</a></div>"
+        f"<p class='tb-meta'>{''.join(f'<span>{x}</span>' for x in meta)}</p>"
+        f"<nav class='pills' aria-label='Davr'>{''.join(pills)}</nav>"
+        f"{form}{warn}</header>{script}"
     )
 
 
-def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True) -> str:
-    c, t = r["chat"], r["totals"]
-    esc = html.escape
-    title = c["name"]
-    sub = f"@{c['username']}" if c.get("username") else c.get("type", "")
-    body: list[str] = [top_html]
-    if show_header:
-        body.append(f"<h1>{esc(title)}</h1><div class='muted'>{esc(sub)}</div>")
-        if c.get("description"):
-            body.append(f"<p class='muted desc'>{esc(c['description'])}</p>")
-    if not t.get("messages"):
-        body.append("<div class='card'><h2>Postlar topilmadi</h2><p class='muted'>Tanlangan filtrlarga mos post yo'q. "
-                    "Davrni kengaytiring yoki boshqa post turini tanlang.</p></div>")
-        return _page(title, body)
+def _delta(cur: float | None, prev: float | None, points: bool = False) -> str:
+    """KPI ostidagi o'zgarish: ↑ 12% / ↓ 3 p.p."""
+    if cur is None or prev is None:
+        return "<div class='d'>solishtirish yo'q</div>"
+    if points:
+        diff = round(cur - prev, 2)
+        cls = "up" if diff > 0 else "down" if diff < 0 else ""
+        arrow = "↑" if diff > 0 else "↓" if diff < 0 else "≈"
+        return f"<div class='d {cls}'>{arrow} {abs(diff):g} p.p.</div>"
+    if not prev:
+        return "<div class='d'>oldin 0</div>" if cur else "<div class='d'>≈ 0%</div>"
+    pct = (cur - prev) / prev * 100
+    cls = "up" if pct >= 0.5 else "down" if pct <= -0.5 else ""
+    arrow = "↑" if pct >= 0.5 else "↓" if pct <= -0.5 else "≈"
+    return f"<div class='d {cls}'>{arrow} {abs(pct):.0f}%</div>"
 
-    ch = r.get("channel")
+
+def _legacy_kpis(c: dict[str, Any], t: dict[str, Any], ch: dict[str, Any] | None) -> str:
+    """Solishtirishsiz KPI'lar (buyruq qatori hisoboti)."""
+    esc = html.escape
     kpis = [("Postlar" if ch else "Xabarlar", t["messages"]),
             ("Davr (kun)", t["span_days"]), ("Kuniga o'rtacha", t["avg_per_day"])]
     if c.get("subscribers"):
@@ -341,9 +381,55 @@ def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True) -> 
         kpis.append(("Reaksiya darajasi", f"{ch['avg_reaction_rate_pct']}%"))
     else:
         kpis += [("Ishtirokchilar", t["participants"]), ("Reaksiyalar", t["reactions"])]
-    body.append("<div class='grid'>" + "".join(
+    return "<div class='grid'>" + "".join(
         f"<div class='kpi'><div class='k'>{esc(k)}</div><div class='v'>{esc(_n(v))}</div></div>" for k, v in kpis
-    ) + "</div>")
+    ) + "</div>"
+
+
+def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
+            compare: dict[str, Any] | None = None) -> str:
+    """compare berilsa (sayt), KPI'lar solishtirish davriga nisbatan o'zgarish bilan chiqadi."""
+    c, t = r["chat"], r["totals"]
+    esc = html.escape
+    title = c["name"]
+    sub = f"@{c['username']}" if c.get("username") else c.get("type", "")
+    body: list[str] = [top_html]
+    if show_header:
+        body.append(f"<h1>{esc(title)}</h1><div class='muted'>{esc(sub)}</div>")
+        if c.get("description"):
+            body.append(f"<p class='muted desc'>{esc(c['description'])}</p>")
+    if not t.get("messages"):
+        body.append("<div class='card'><h2>Postlar topilmadi</h2><p class='muted'>Tanlangan filtrlarga mos post yo'q. "
+                    "Davrni kengaytiring yoki boshqa post turini tanlang.</p></div>")
+        return _page(title, body)
+
+    ch = r.get("channel")
+    if compare is not None and ch:
+        pc, pt = compare.get("channel") or {}, compare.get("totals") or {}
+        have = bool(compare.get("available"))
+
+        def prev(v):
+            return v if have else None
+
+        tiles = [
+            ("Postlar", _n(t["messages"]), _delta(t["messages"], prev(pt.get("messages", 0)))),
+            ("Ko'rishlar jami", _n(ch["total_views"]), _delta(ch["total_views"], prev(pc.get("total_views", 0)))),
+            ("O'rtacha ko'rish", _n(ch["avg_views"]), _delta(ch["avg_views"], prev(pc.get("avg_views")))),
+            ("Mediana ko'rish", _n(ch["median_views"]), _delta(ch["median_views"], prev(pc.get("median_views")))),
+            ("Reaksiyalar", _n(t["reactions"]), _delta(t["reactions"], prev(pt.get("reactions", 0)))),
+            ("Reaksiya darajasi", f"{ch['avg_reaction_rate_pct']}%",
+             _delta(ch["avg_reaction_rate_pct"], prev(pc.get("avg_reaction_rate_pct")), points=True)),
+        ]
+        if ch["err_pct"] is not None:
+            tiles.append(("ERR", f"{ch['err_pct']}%", _delta(ch["err_pct"], prev(pc.get("err_pct")), points=True)))
+        if c.get("subscribers"):
+            tiles.append(("Obunachilar", _n(c["subscribers"]), "<div class='d'>hozir</div>"))
+        body.append("<div class='grid'>" + "".join(
+            f"<div class='kpi'><div class='k'>{esc(k)}</div><div class='v'>{esc(v)}</div>{d}</div>"
+            for k, v, d in tiles
+        ) + "</div>")
+    else:
+        body.append(_legacy_kpis(c, t, ch))
     body.append(f"<p class='muted'>{t['first_message'][:10]} — {t['last_message'][:10]} · "
                 f"eng faol kun {t['busiest_day']['date']} ({t['busiest_day']['messages']} ta)</p>")
 
@@ -351,7 +437,16 @@ def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True) -> 
         if ch["recommendations"]:
             body.append("<div class='card tips'><h2>Tavsiyalar</h2><ul class='tips-list'>" +
                         "".join(f"<li>{esc(x)}</li>" for x in ch["recommendations"]) + "</ul></div>")
-        if ch["views_by_month"]:
+        if t["span_days"] <= 62 and ch.get("views_by_day"):
+            # Qisqa davr: har kuni chiqqan postlarning jami ko'rishlari (postsiz kunlar 0).
+            from datetime import date as _date, timedelta as _td
+            first = _date.fromisoformat(t["first_message"][:10])
+            days = [first + _td(days=i) for i in range(t["span_days"])]
+            vals = [ch["views_by_day"].get(d.isoformat(), 0) for d in days]
+            body.append("<div class='card'><h2>Kunlar bo'yicha ko'rishlar</h2>" +
+                        _svg_bars([d.strftime("%d.%m") for d in days], vals) +
+                        "<p class='muted note'>Shu kuni chiqqan postlarning jami ko'rishlari.</p></div>")
+        elif ch["views_by_month"]:
             body.append("<div class='card'><h2>Oylar bo'yicha o'rtacha ko'rish</h2>" +
                         _svg_bars(list(ch["views_by_month"]), list(ch["views_by_month"].values())) + "</div>")
         hv = {row["key"]: row for row in ch["views_by_hour"]}

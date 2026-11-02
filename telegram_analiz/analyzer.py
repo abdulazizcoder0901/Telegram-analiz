@@ -322,6 +322,9 @@ def _channel_stats(chat: Chat, msgs: list[Message], top_n: int) -> dict[str, Any
     # Oxirgi postlar hali ko'rishlarni yig'ayotgan bo'ladi — ularni trenddan chiqaramiz.
     now_cutoff = msgs[-1].date - timedelta(days=2)
     mature = [m for m in viewed if m.date <= now_cutoff] or viewed
+    day_views: dict[str, list[int]] = defaultdict(list)
+    for m in viewed:
+        day_views[m.date.date().isoformat()].append(m.views)
     month_views: dict[str, list[int]] = defaultdict(list)
     for m in mature:
         month_views[m.date.strftime("%Y-%m")].append(m.views)
@@ -358,6 +361,7 @@ def _channel_stats(chat: Chat, msgs: list[Message], top_n: int) -> dict[str, Any
         "views_by_type": sorted(table(type_views), key=lambda r: -r["avg_views"]),
         "views_by_length": sorted(table(length_views), key=lambda r: r["key"]),
         "views_by_month": {k: round(sum(v) / len(v)) for k, v in sorted(month_views.items())},
+        "views_by_day": {k: sum(v) for k, v in sorted(day_views.items())},
         "best_hour": max(reliable_hours, key=lambda r: r["avg_views"])["key"] if by_hour else None,
         "top_posts": [_post_summary(m) for m in sorted(viewed, key=lambda m: -m.views)[:top_n]],
         "worst_posts": [_post_summary(m) for m in sorted(mature, key=lambda m: m.views)[:5]],

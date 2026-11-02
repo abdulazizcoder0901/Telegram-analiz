@@ -36,8 +36,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--delay", type=float, default=1.0, help="sahifalar orasidagi pauza, soniya")
     p.add_argument("--tz", help="kanal vaqtlari uchun vaqt zonasi, masalan +5 yoki Asia/Tashkent "
                    "(standart: kompyuter vaqt zonasi)")
-    p.add_argument("--period", choices=["all", "7", "30", "90", "365"], default="all",
-                   help="faqat oxirgi N kun postlari")
+    p.add_argument("--period", default="all",
+                   choices=["all", "today", "yesterday", "7", "14", "30", "90", "365", "this_month", "last_month"],
+                   help="davr: oxirgi N kun, this_month (shu oy), last_month (o'tgan oy) ...")
+    p.add_argument("--month", metavar="YYYY-MM", help="tanlangan oy, masalan 2026-10")
     p.add_argument("--from", dest="date_from", metavar="YYYY-MM-DD", help="shu sanadan boshlab")
     p.add_argument("--to", dest="date_to", metavar="YYYY-MM-DD", help="shu sanagacha")
     p.add_argument("--type", action="append", metavar="TUR",
@@ -89,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Xato: {exc}", file=sys.stderr)
         return 1
 
-    filters = parse_filters(args.period, args.date_from, args.date_to, args.type)
+    filters = parse_filters(args.period, args.date_from, args.date_to, args.type, month=args.month)
     if filters.active:
         total = len(chat.messages)
         chat = apply_filters(chat, filters)

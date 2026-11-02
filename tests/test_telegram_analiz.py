@@ -162,25 +162,61 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class VercelFunctionTests(unittest.TestCase):
-    def test_run(self):
-        import importlib.util
-        from unittest import mock
+def _load_api():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("api_analyze", Path(__file__).parent.parent / "api" / "analyze.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
-        spec = importlib.util.spec_from_file_location("api_analyze", Path(__file__).parent.parent / "api" / "analyze.py")
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        page = (FIX / "channel_page.html").read_text(encoding="utf-8")
-        with mock.patch("telegram_analiz.scraper.fetch_page", lambda c, b, timeout=10: page if b is None else ""):
-            status, ctype, body = mod.run({"channel": ["@test_academy"], "limit": ["100"]})
-            self.assertEqual(status, 200)
-            self.assertIn("Vaqtlar UTC+5", body)
-            self.assertNotIn("<h1>", body)  # saytda kanal sarlavhasi ko'rsatilmaydi
-            self.assertIn("<title>Test Academy tahlili</title>", body)
-            status, ctype, body = mod.run({"channel": ["test_academy"], "format": ["json"]})
-            self.assertEqual(json.loads(body)["channel"]["total_views"], 5410)
-        self.assertEqual(mod.DEFAULT_CHANNEL, "junior_academy")
-        self.assertEqual(mod.run({"channel": ["a b"]})[0], 400)
+
+class VercelFunctionTests(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_api()
+        self.page = (FIX / "channel_page.html").read_text(encoding="utf-8")
+        self.calls = []
+
+        def fake_fetch(channel, before, timeout=10):
+            self.calls.append(before)
+            return self.page if before is None else ""
+
+        self.mod.fetch_page = fake_fetch
+
+    def test_dashboard_html(self):
+        status, ctype, body = self.mod.run({"preset": ["all"]})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.mod.DEFAULT_CHANNEL, "junior_academy")
+        self.assertIn("Junior: Telegram", body)
+        self.assertIn("↻ Yangilash", body)
+        import html as _h
+        text = _h.unescape(body)
+        for label in ("Bugun", "Kecha", "7 kun", "14 kun", "30 kun", "Shu oy", "O'tgan oy",
+                      "O'tgan oyda shu sana", "Oyni tanlang", "Ko'rsatish"):
+            self.assertIn(label, text)
+        self.assertEqual(body.count("class='pill on'"), 0)  # "all" tugmalar orasida yo'q
+        self.assertNotIn("<h1>Test Academy", body)
+        self.assertEqual(self.mod.run({"channel": ["a b"]})[0], 400)
+
+    def test_json_and_cache(self):
+        status, _, body = self.mod.run({"from": ["2026-10-01"], "to": ["2026-10-03"], "format": ["json"]})
+        data = json.loads(body)
+        self.assertEqual(data["channel"]["total_views"], 5410)
+        self.assertEqual(data["filters"]["compare"], {"from": "2026-09-28", "to": "2026-09-30", "available": True})
+        self.assertEqual(data["compare"]["totals"]["messages"], 0)
+        n = len(self.calls)
+        self.mod.run({"month": ["2026-10"], "type": ["poll"], "format": ["json"]})
+        self.assertEqual(len(self.calls), n, "keshdan olinishi kerak")
+        self.mod.run({"preset": ["all"], "refresh": ["1"]})
+        self.assertGreater(len(self.calls), n)
+
+    def test_filters(self):
+        _, _, body = self.mod.run({"month": ["2026-10"], "type": ["poll"], "format": ["json"]})
+        data = json.loads(body)
+        self.assertEqual(data["filters"]["posts_shown"], 1)
+        self.assertEqual(data["channel"]["total_views"], 2100)
+        status, _, body = self.mod.run({"preset": ["all"], "type": ["text"]})
+        self.assertEqual(status, 200)
+        self.assertIn("Postlar topilmadi", body)
 
 
 class FilterTests(unittest.TestCase):
@@ -213,22 +249,29 @@ class FilterTests(unittest.TestCase):
         self.assertIsNone(coverage_warning(self.chat, parse_filters("all"), today))
         self.assertEqual({k for k, _, _ in type_options(self.chat)}, {"photo", "video_file", "poll", "unsupported"})
 
-    def test_api_filters(self):
-        import importlib.util
-        from unittest import mock
-        spec = importlib.util.spec_from_file_location("api_analyze2", Path(__file__).parent.parent / "api" / "analyze.py")
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        page = (FIX / "channel_page.html").read_text(encoding="utf-8")
-        with mock.patch("telegram_analiz.scraper.fetch_page", lambda c, b, timeout=10: page if b is None else ""):
-            status, _, body = mod.run({"channel": ["test_academy"], "type": ["poll"], "format": ["json"]})
-            data = json.loads(body)
-            self.assertEqual(data["filters"]["posts_shown"], 1)
-            self.assertEqual(data["channel"]["total_views"], 2100)
-            status, _, body = mod.run({"channel": ["test_academy"], "type": ["text"]})
-            self.assertEqual(status, 200)
-            self.assertIn("id='filters'", body)
-            self.assertIn("Postlar topilmadi", body)
+    def test_presets_and_comparison(self):
+        from datetime import date
+        from telegram_analiz.filters import format_range, parse_filters, shift_month
+        today = date(2026, 11, 3)
+        f = parse_filters("this_month")
+        self.assertEqual(f.bounds(today), (date(2026, 11, 1), today))
+        self.assertEqual(f.comparison(today), (date(2026, 10, 1), date(2026, 10, 31)))
+        self.assertEqual(format_range(*f.bounds(today), today), "1–3-noy")
+        self.assertEqual(format_range(*f.comparison(today), today), "1–31-okt")
+        f = parse_filters("7")
+        self.assertEqual(f.comparison(today), (date(2026, 10, 21), date(2026, 10, 27)))
+        f = parse_filters("yesterday")
+        self.assertEqual(f.bounds(today), (date(2026, 11, 2), date(2026, 11, 2)))
+        f = parse_filters(None, month="2026-09")
+        self.assertEqual(f.bounds(today), (date(2026, 9, 1), date(2026, 9, 30)))
+        self.assertEqual(f.comparison(today), (date(2026, 8, 1), date(2026, 8, 31)))
+        f = parse_filters("last_month")
+        self.assertEqual(f.bounds(today), (date(2026, 10, 1), date(2026, 10, 31)))
+        self.assertEqual(shift_month(date(2026, 3, 31)), date(2026, 2, 28))
+        self.assertEqual(format_range(date(2026, 10, 28), date(2026, 11, 3), today), "28-okt – 3-noy")
+        self.assertEqual(format_range(date(2025, 12, 1), date(2025, 12, 1), today), "1-dek 2025")
+        # aniq sana oy va presetdan ustun
+        self.assertEqual(parse_filters("7", "2026-10-01", None, month="2026-09").period, "custom")
 
 
 def _fake_admin_stats():
