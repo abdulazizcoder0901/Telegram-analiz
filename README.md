@@ -56,8 +56,9 @@ python -m telegram_analiz --saved-html sahifa.html --name junior_academy --tz +5
 
 ## Veb-versiya (Vercel)
 
-`public/index.html` — kanal nomi kiritiladigan sahifa, `api/analyze.py` — tahlil funksiyasi
-(`/api/analyze?channel=@kanal&limit=300&tz=+5`, JSON uchun `&format=json`).
+Sayt ochilganda (`/`) to'g'ridan-to'g'ri **@junior_academy** dashboardi chiqadi
+(`api/analyze.py` dagi `DEFAULT_CHANNEL`). Boshqa kanal: `/api/analyze?channel=@kanal&limit=300&tz=+5`,
+JSON uchun `&format=json`.
 Hisobot tepasida filtrlar bor: davr (7/30/90/365 kun yoki sanalar), post turi va yig'iladigan postlar soni
 (`&period=30`, `&from=2026-01-01&to=2026-03-31`, `&type=photo`).
 Vercel funksiyasi 60 soniya bilan cheklangani uchun veb-versiya oxirgi 600 tagacha postni tahlil qiladi.

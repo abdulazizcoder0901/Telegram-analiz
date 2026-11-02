@@ -21,6 +21,7 @@ from telegram_analiz.loader import ExportError  # noqa: E402
 from telegram_analiz.report import CSS, render_filter_bar, to_html, to_json  # noqa: E402
 from telegram_analiz.scraper import normalize_channel, parse_tz, scrape_channel  # noqa: E402
 
+DEFAULT_CHANNEL = "junior_academy"  # sayt ochilganda shu kanal ko'rsatiladi
 MAX_POSTS = 600
 DEFAULT_POSTS = 300
 TIME_BUDGET = 45  # soniya; Vercel funksiyasi 60 soniyada to'xtatiladi
@@ -28,12 +29,9 @@ LIMIT_CHOICES = (100, 300, 600)
 CACHE_TTL = 600  # yig'ilgan postlar iliq funksiya xotirasida 10 daqiqa saqlanadi
 _CACHE: dict[tuple, tuple[float, object]] = {}
 
-NAV = (
-    "<nav class='topnav'><a href='/'>← Boshqa kanal</a>"
-    "<span class='muted'>{note}</span></nav>"
-)
+NAV = "<nav class='topnav'><span class='muted'>{note}</span></nav>"
 EXTRA_CSS = (
-    ".topnav{display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:space-between;"
+    ".topnav{display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:flex-end;"
     "align-items:baseline;margin-bottom:20px;font-size:14px}"
 )
 
@@ -43,7 +41,7 @@ def _error_page(message: str, status: int) -> tuple[int, str, str]:
         "<!doctype html><html lang='uz'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<title>Xato</title><style>{CSS}{EXTRA_CSS}</style></head><body><main>"
-        "<nav class='topnav'><a href='/'>← Bosh sahifa</a></nav>"
+        "<nav class='topnav'><a href='/'>← Qaytadan urinish</a></nav>"
         f"<div class='card'><h2>Tahlil qilib bo'lmadi</h2><p>{html.escape(message)}</p></div>"
         "</main></body></html>"
     )
@@ -51,9 +49,7 @@ def _error_page(message: str, status: int) -> tuple[int, str, str]:
 
 
 def run(query: dict[str, list[str]]) -> tuple[int, str, str]:
-    raw = (query.get("channel") or [""])[0].strip()
-    if not raw:
-        return _error_page("Kanal nomini kiriting, masalan @junior_academy.", 400)
+    raw = (query.get("channel") or [""])[0].strip() or DEFAULT_CHANNEL
     tz_raw = (query.get("tz") or ["+5"])[0]
     try:
         channel = normalize_channel(raw)

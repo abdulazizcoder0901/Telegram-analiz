@@ -175,10 +175,10 @@ class VercelFunctionTests(unittest.TestCase):
             status, ctype, body = mod.run({"channel": ["@test_academy"], "limit": ["100"]})
             self.assertEqual(status, 200)
             self.assertIn("Test Academy", body)
-            self.assertIn("Boshqa kanal", body)
+            self.assertIn("Vaqtlar UTC+5", body)
             status, ctype, body = mod.run({"channel": ["test_academy"], "format": ["json"]})
             self.assertEqual(json.loads(body)["channel"]["total_views"], 5410)
-        self.assertEqual(mod.run({})[0], 400)
+        self.assertEqual(mod.DEFAULT_CHANNEL, "junior_academy")
         self.assertEqual(mod.run({"channel": ["a b"]})[0], 400)
 
 
