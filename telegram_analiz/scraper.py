@@ -37,6 +37,7 @@ _MEDIA_MARKERS = [
     ("tgme_widget_message_location", "location"),
     ("tgme_widget_message_photo_wrap", "photo"),
     ("tgme_widget_message_grouped", "album"),
+    ("message_media_not_supported", "unsupported"),
 ]
 
 
@@ -131,8 +132,14 @@ def _first(pattern: str, text: str, flags: int = re.S) -> str | None:
 
 def _parse_reactions(block: str) -> dict[str, int]:
     reactions: dict[str, int] = {}
-    for chunk in re.findall(r'<span class="tgme_reaction[^"]*">(.*?)</span>', block, re.S):
-        emoji = _first(r"<b>(.*?)</b>", chunk) or _first(r'alt="([^"]+)"', chunk) or "⭐"
+    for classes, chunk in re.findall(r'<span class="(tgme_reaction[^"]*)">(.*?)</span>', block, re.S):
+        if "paid" in classes:
+            emoji = "⭐"  # Telegram Stars (pullik reaksiya)
+        elif "<tg-emoji" in chunk:
+            emoji = "✨ maxsus"  # kanalning custom emojisi — vebda belgisi ko'rinmaydi
+        else:
+            emoji = _first(r"<b>(.*?)</b>", chunk) or _first(r'alt="([^"]+)"', chunk) or "?"
+        chunk = re.sub(r"<tg-emoji.*?</tg-emoji>", "", chunk, flags=re.S)
         count = parse_count(re.sub(r"<[^>]+>", "", re.sub(r"<b>.*?</b>", "", chunk, flags=re.S)))
         if count:
             reactions[emoji] = reactions.get(emoji, 0) + count
@@ -192,7 +199,11 @@ def parse_post(block: str, channel: str, tz: tzinfo | None = None) -> Message | 
             r'tgme_widget_message_forwarded_from_name"[^>]*>(?:<span[^>]*>)?(.*?)</', block
         ) or "?"
 
-    entities = [{"type": "link", "text": href} for href in links]
+    entities = [
+        {"type": "link", "text": href}
+        for href in links
+        if href.lower().startswith(("http://", "https://", "//"))  # heshteg (?q=…) va tel: emas
+    ]
     entities += [
         {"type": "hashtag", "text": tag} for tag in re.findall(r"#[\w\d_]+", text)
     ]
@@ -205,7 +216,8 @@ def parse_post(block: str, channel: str, tz: tzinfo | None = None) -> Message | 
         text=text,
         kind="service" if is_service else "message",
         media_type=media_type,
-        reply_to=None,
+        reply_to=int(reply) if (reply := _first(
+            r'class="tgme_widget_message_reply[^"]*"\s+href="[^"]*/(\d+)"', block)) else None,
         forwarded_from=forwarded,
         edited=bool(re.search(r"\bedited\b", _first(r'tgme_widget_message_meta"(.*?)</time>', block) or "")),
         reactions=_parse_reactions(block),

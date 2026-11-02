@@ -62,6 +62,10 @@ def to_text(r: dict[str, Any], top_n: int = 10) -> str:
         if ch["err_pct"] is not None:
             add(f"  ERR (ko'rish/obunachi): {ch['err_pct']}%")
         add(f"  Reaksiya darajasi:     {ch['avg_reaction_rate_pct']}% ko'rishlardan")
+        rec = ch.get("recent_30d") or {}
+        if rec.get("posts"):
+            add(f"  Oxirgi 30 kun:         {rec['posts']} post, o'rtacha {_n(rec['avg_views'])} ko'rish"
+                + (f", ERR {rec['err_pct']}%" if rec.get("err_pct") is not None else ""))
         add(f"  Postlar oralig'i:      ~{ch['avg_hours_between_posts']} soat")
         if ch["best_hour"] is not None:
             add(f"  Eng yaxshi soat:       {ch['best_hour']:02d}:00")
@@ -128,7 +132,7 @@ def to_text(r: dict[str, Any], top_n: int = 10) -> str:
 
 # ---------------------------------------------------------------- HTML
 
-def _svg_bars(labels: list[str], values: list[float], height: int = 180, fmt=_n) -> str:
+def _svg_bars(labels: list[str], values: list[float], height: int = 180, fmt=_n, weak: set[int] | None = None) -> str:
     if not values:
         return ""
     n = len(values)
@@ -138,17 +142,18 @@ def _svg_bars(labels: list[str], values: list[float], height: int = 180, fmt=_n)
     bar_w = min(bw * 0.7, 44)
     pad_top, pad_bottom = 18, 22
     inner = height - pad_top - pad_bottom
-    parts = [f'<svg viewBox="0 0 {width} {height}" class="chart" role="img">']
-    step = max(1, n // 12)
+    parts = [f'<svg viewBox="-16 0 {width + 32} {height}" class="chart" role="img">']
+    step = 1 if n <= 24 else -(-n // 10)  # ko'p ustunda har k-chi yozuv
     for i, (lab, v) in enumerate(zip(labels, values)):
         h = inner * v / mx
         x = i * bw + (bw - bar_w) / 2
         y = pad_top + inner - h
         parts.append(
-            f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w:.1f}" height="{h:.1f}" rx="2">'
+            f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w:.1f}" height="{h:.1f}" rx="2"'
+            f'{" class=\"weak\"" if weak and i in weak else ""}>'
             f"<title>{html.escape(str(lab))}: {fmt(v)}</title></rect>"
         )
-        if n <= 31 or i % step == 0:
+        if i % step == 0:
             parts.append(
                 f'<text x="{i * bw + bw / 2:.1f}" y="{height - 6}" class="lbl">{html.escape(str(lab))}</text>'
             )
@@ -200,19 +205,26 @@ def _post_rows(posts: list[dict[str, Any]]) -> list[list[Any]]:
 
 
 CSS = """
-:root{--bg:#f7f7f5;--card:#fff;--fg:#1d1d1f;--muted:#6b6b70;--line:#e4e4e0;--accent:#2a7de1;--chip:#eef3fb}
-@media (prefers-color-scheme:dark){:root{--bg:#141416;--card:#1e1e21;--fg:#ececee;--muted:#9a9aa2;--line:#2e2e33;--accent:#5aa2ff;--chip:#22303f}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-main{max-width:1080px;margin:0 auto;padding:24px 16px 64px}h1{font-size:26px;margin:0 0 4px}h2{font-size:17px;margin:0 0 12px}
-.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:20px 0}
-.kpi,.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}.card{margin:16px 0}
-.kpi .v{font-size:22px;font-weight:650}.kpi .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+/* Layout: bir ustunli hisobot — avval KPI va tavsiyalar, keyin grafiklar, oxirida tafsilotlar. */
+:root{--bg:#f4f6f9;--card:#ffffff;--fg:#17202b;--muted:#5e6b7a;--line:#dfe5ec;--accent:#2b7bd6;--chip:#e9f1fb;--good:#1f8a5b;--warn:#b7791f;
+--font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--font-num:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#11161d;--card:#18202a;--fg:#e6ebf1;--muted:#93a1b1;--line:#28323e;--accent:#5ea4f0;--chip:#1d2b3b;--good:#4cc38a;--warn:#e0a84a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#11161d;--card:#18202a;--fg:#e6ebf1;--muted:#93a1b1;--line:#28323e;--accent:#5ea4f0;--chip:#1d2b3b;--good:#4cc38a;--warn:#e0a84a;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 var(--font-body)}
+main{max-width:1080px;margin:0 auto;padding-block:28px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1{font-size:28px;line-height:1.2;margin:0 0 4px;text-wrap:balance}h2{font-size:16px;margin:0 0 12px;text-wrap:balance}
+.muted{color:var(--muted)}.desc{white-space:pre-line;max-width:65ch}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:20px 0}
+.kpi,.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}.card{margin:16px 0}
+.kpi .v{font:600 22px/1.2 var(--font-num);font-variant-numeric:tabular-nums;margin-top:4px}.kpi .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .chart{width:100%;height:auto;display:block}.chart rect{fill:var(--accent)}.chart .lbl{font-size:10px;fill:var(--muted);text-anchor:middle}
-.chart .lbl.end{text-anchor:end}.heat{max-width:640px}.tw{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}
-th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:12px;color:var(--muted);font-weight:600}
-a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.chip{display:inline-block;background:var(--chip);border-radius:999px;padding:3px 10px;margin:3px;font-size:13px}
-ul.tips{margin:0;padding-left:20px}ul.tips li{margin:6px 0}.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
-.two .card{margin:0}
+.chart rect.weak{fill-opacity:.3}.note{font-size:13px;margin:8px 0 0}.chart .lbl.end{text-anchor:end}.heat{max-width:640px}.tw{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+td:nth-child(2),td:nth-child(3){white-space:nowrap}
+a{color:var(--accent);text-decoration:none}a:hover,a:focus-visible{text-decoration:underline}a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.chip{display:inline-block;background:var(--chip);border-radius:999px;padding:3px 10px;margin:3px;font-size:13px}.chip b{font-family:var(--font-num);font-weight:600}
+.tips{border-color:var(--accent)}ul.tips-list{margin:0;padding-left:20px;max-width:75ch}ul.tips-list li{margin:7px 0}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}.two .card{margin:0}
 """
 
 
@@ -223,7 +235,7 @@ def to_html(r: dict[str, Any]) -> str:
     sub = f"@{c['username']}" if c.get("username") else c.get("type", "")
     body: list[str] = [f"<h1>{esc(title)}</h1><div class='muted'>{esc(sub)}</div>"]
     if c.get("description"):
-        body.append(f"<p class='muted'>{esc(c['description'])}</p>")
+        body.append(f"<p class='muted desc'>{esc(c['description'])}</p>")
     if not t.get("messages"):
         body.append("<p>Xabarlar topilmadi.</p>")
         return _page(title, body)
@@ -236,7 +248,12 @@ def to_html(r: dict[str, Any]) -> str:
     if ch:
         kpis += [("O'rtacha ko'rish", ch["avg_views"]), ("Mediana ko'rish", ch["median_views"])]
         if ch["err_pct"] is not None:
-            kpis.append(("ERR", f"{ch['err_pct']}%"))
+            kpis.append(("ERR (butun davr)", f"{ch['err_pct']}%"))
+        rec = ch.get("recent_30d") or {}
+        if rec.get("posts"):
+            kpis.append(("Ko'rish (30 kun)", rec["avg_views"]))
+            if rec.get("err_pct") is not None:
+                kpis.append(("ERR (30 kun)", f"{rec['err_pct']}%"))
         kpis.append(("Reaksiya darajasi", f"{ch['avg_reaction_rate_pct']}%"))
     else:
         kpis += [("Ishtirokchilar", t["participants"]), ("Reaksiyalar", t["reactions"])]
@@ -248,14 +265,19 @@ def to_html(r: dict[str, Any]) -> str:
 
     if ch:
         if ch["recommendations"]:
-            body.append("<div class='card'><h2>Tavsiyalar</h2><ul class='tips'>" +
+            body.append("<div class='card tips'><h2>Tavsiyalar</h2><ul class='tips-list'>" +
                         "".join(f"<li>{esc(x)}</li>" for x in ch["recommendations"]) + "</ul></div>")
         if ch["views_by_month"]:
             body.append("<div class='card'><h2>Oylar bo'yicha o'rtacha ko'rish</h2>" +
                         _svg_bars(list(ch["views_by_month"]), list(ch["views_by_month"].values())) + "</div>")
-        hv = {row["key"]: row["avg_views"] for row in ch["views_by_hour"]}
+        hv = {row["key"]: row for row in ch["views_by_hour"]}
+        min_posts = max(3, round(ch["posts_with_views"] * 0.02))
+        weak = {h for h in range(24) if hv.get(h, {}).get("posts", 0) < min_posts}
         body.append("<div class='card'><h2>Chiqarilgan soat bo'yicha o'rtacha ko'rish</h2>" +
-                    _svg_bars([f"{h:02d}" for h in range(24)], [hv.get(h, 0) for h in range(24)]) + "</div>")
+                    _svg_bars([f"{h:02d}" for h in range(24)], [hv.get(h, {}).get("avg_views", 0) for h in range(24)],
+                              weak=weak) +
+                    f"<p class='muted note'>Och rangli ustunlar: {min_posts} tadan kam post chiqqan soatlar, "
+                    "ularga ishonib bo'lmaydi.</p></div>")
         body.append("<div class='two'>")
         body.append("<div class='card'><h2>Post turi bo'yicha</h2>" + _table(
             ["Tur", "Postlar", "O'rt. ko'rish", "Mediana"],
@@ -304,8 +326,12 @@ def to_html(r: dict[str, Any]) -> str:
 def _page(title: str, body: list[str]) -> str:
     return (
         "<!doctype html><html lang='uz'><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        f"<title>{html.escape(title)} — tahlil</title><style>{CSS}</style></head>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1,viewport-fit=cover'>"
+        "<meta name='claude:viewport-fit-sides' content='cover'>"
+        f"<title>{html.escape(title)} tahlili</title>"
+        "<link rel='stylesheet' href='https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600"
+        "&family=IBM+Plex+Sans:wght@400;600&display=swap'>"
+        f"<style>{CSS}</style></head>"
         f"<body><main>{''.join(body)}</main></body></html>"
     )
 

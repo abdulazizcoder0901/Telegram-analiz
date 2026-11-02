@@ -27,6 +27,7 @@ MEDIA_LABELS = {
     "location": "Joylashuv",
     "contact": "Kontakt",
     "album": "Albom",
+    "unsupported": "Vebda ko'rinmaydi",
 }
 
 STOPWORDS = set(
@@ -77,7 +78,9 @@ def _links(msg: Message) -> list[str]:
 
 
 def _domain(url: str) -> str:
-    if not url.lower().startswith(("http://", "https://")):
+    if url.startswith("//"):
+        url = "https:" + url
+    elif not url.lower().startswith(("http://", "https://")):
         url = "https://" + url
     host = urlparse(url).netloc.lower()
     return host[4:] if host.startswith("www.") else host
@@ -166,7 +169,7 @@ def analyze(chat: Chat, top_n: int = 15, reply_gap_hours: float = 6.0) -> dict[s
         links = _links(m)
         if links:
             with_links += 1
-        domains.update(_domain(u) for u in links)
+        domains.update(d for d in (_domain(u) for u in links) if d)
         media[MEDIA_LABELS.get(m.media_type, m.media_type)] += 1
         reactions.update(m.reactions)
         if m.text:
@@ -312,7 +315,8 @@ def _channel_stats(chat: Chat, msgs: list[Message], top_n: int) -> dict[str, Any
 
     by_hour = sorted(table(hour_views), key=lambda r: r["key"])
     by_weekday = table(dict(sorted(weekday_views.items())), WEEKDAYS)
-    reliable_hours = [r for r in by_hour if r["posts"] >= 3] or by_hour
+    min_posts = max(3, round(len(viewed) * 0.02))
+    reliable_hours = [r for r in by_hour if r["posts"] >= min_posts] or by_hour
     avg_views = round(sum(views) / len(views)) if views else 0
 
     # Oxirgi postlar hali ko'rishlarni yig'ayotgan bo'ladi — ularni trenddan chiqaramiz.
@@ -322,8 +326,26 @@ def _channel_stats(chat: Chat, msgs: list[Message], top_n: int) -> dict[str, Any
     for m in mature:
         month_views[m.date.strftime("%Y-%m")].append(m.views)
 
+    # Oxirgi 30 kun (oxirgi 2 kunsiz): umumiy o'rtacha eski "viral" postlarni ham qamraydi,
+    # bu esa kanalning hozirgi holatini ko'rsatadi.
+    recent_from = now_cutoff - timedelta(days=30)
+    recent = [m for m in viewed if recent_from <= m.date <= now_cutoff]
+    recent_avg = round(sum(m.views for m in recent) / len(recent)) if recent else None
+    recent_stats = {
+        "from": recent_from.date().isoformat(),
+        "to": now_cutoff.date().isoformat(),
+        "posts": len(recent),
+        "avg_views": recent_avg,
+        "err_pct": round(100 * recent_avg / chat.subscribers, 1) if recent_avg and chat.subscribers else None,
+        "reaction_rate_pct": round(_avg([100 * sum(m.reactions.values()) / m.views for m in recent if m.views]), 2),
+    }
+
+    posts_per_hour = Counter(m.date.hour for m in viewed)
+
     stats = {
         "posts_with_views": len(viewed),
+        "recent_30d": recent_stats,
+        "most_used_hour": posts_per_hour.most_common(1)[0][0] if posts_per_hour else None,
         "total_views": sum(views),
         "avg_views": avg_views,
         "median_views": round(statistics.median(views)) if views else 0,
@@ -358,25 +380,49 @@ def _recommendations(s: dict[str, Any], chat: Chat) -> list[str]:
     if s["best_hour"] is not None:
         tips.append(f"Eng ko'p ko'rilgan postlar soat {s['best_hour']:02d}:00 atrofida chiqqan — "
                     "muhim postlarni shu vaqtga rejalashtiring.")
-    types = [r for r in s["views_by_type"] if r["posts"] >= 3]
+    if s["most_used_hour"] is not None and s["best_hour"] is not None and s["most_used_hour"] != s["best_hour"]:
+        hours = {r["key"]: r for r in s["views_by_hour"]}
+        used, best = hours.get(s["most_used_hour"]), hours.get(s["best_hour"])
+        if used and best and best["avg_views"] > used["avg_views"] * 1.1:
+            tips.append(f"Ko'p postlar soat {s['most_used_hour']:02d}:00 da chiqadi (o'rtacha {used['avg_views']} ko'rish), "
+                        f"lekin {s['best_hour']:02d}:00 dagi postlar o'rtacha {best['avg_views']} ko'rish olgan.")
+    types = [r for r in s["views_by_type"] if r["posts"] >= 10 and r["key"] != MEDIA_LABELS["unsupported"]]
     if len(types) >= 2:
         best, worst = types[0], types[-1]
         if best["avg_views"] > worst["avg_views"] * 1.15:
             tips.append(f"'{best['key']}' turidagi postlar o'rtacha {best['avg_views']} ko'rish oladi, "
                         f"'{worst['key']}' esa {worst['avg_views']} — {best['key'].lower()} ulushini oshiring.")
-    if s["err_pct"] is not None:
-        if s["err_pct"] < 10:
-            tips.append(f"ERR {s['err_pct']}% — obunachilarning juda oz qismi postlarni ko'radi; "
+    rec = s["recent_30d"]
+    if rec["avg_views"] and s["avg_views"] and rec["avg_views"] < s["avg_views"] * 0.8:
+        tips.append(f"Oxirgi 30 kunda o'rtacha ko'rish {rec['avg_views']} — butun davrdagi o'rtachadan "
+                    f"({s['avg_views']}) {100 - 100 * rec['avg_views'] / s['avg_views']:.0f}% past. "
+                    + (f"Hozirgi ERR {rec['err_pct']}%." if rec["err_pct"] is not None else ""))
+    err = rec["err_pct"] if rec.get("err_pct") is not None else s["err_pct"]
+    if err is not None:
+        period = "oxirgi 30 kun" if rec.get("err_pct") is not None else "butun davr"
+        if err < 10:
+            tips.append(f"ERR {err}% ({period}) — obunachilarning juda oz qismi postlarni ko'radi; "
                         "obunachilar sifatini (bot/nofaol) tekshiring.")
-        elif s["err_pct"] >= 30:
-            tips.append(f"ERR {s['err_pct']}% — auditoriya faol, bu yaxshi ko'rsatkich.")
+        elif err < 30:
+            tips.append(f"ERR {err}% ({period}) — o'rtacha daraja; obunachilarning ko'pchiligi postlarni "
+                        "ko'rmayapti. Faol bo'lmagan obunachilarni qaytarish uchun interaktiv kontent kerak.")
+        else:
+            tips.append(f"ERR {err}% ({period}) — auditoriya faol, bu yaxshi ko'rsatkich.")
     if s["avg_reaction_rate_pct"] < 1:
         tips.append("Reaksiyalar kam (<1% ko'rishlardan) — savol, so'rovnoma va CTA qo'shib ko'ring.")
-    months = list(s["views_by_month"].values())
-    if len(months) >= 3:
-        change = (months[-1] - months[0]) / max(months[0], 1) * 100
+    months = s["views_by_month"]
+    if len(months) >= 6:
+        values = list(months.values())
+        last3, prev3 = values[-3:], values[-6:-3]
+        change = (sum(last3) - sum(prev3)) / max(sum(prev3), 1) * 100
         trend = "o'smoqda" if change > 10 else "pasaymoqda" if change < -10 else "barqaror"
-        tips.append(f"O'rtacha ko'rishlar trendi {trend} ({change:+.0f}% birinchi oydan oxirgisigacha).")
+        peak_month = max(months, key=months.get)
+        tip = (f"Ko'rishlar trendi {trend}: oxirgi 3 oyda o'rtacha {round(sum(last3) / 3)}, "
+               f"undan oldingi 3 oyda {round(sum(prev3) / 3)} ({change:+.0f}%).")
+        if months[peak_month] > values[-1] * 1.5:
+            tip += (f" Cho'qqi {peak_month} da ({months[peak_month]}) bo'lgan — o'sha davrda nima "
+                    "qilinganini (reklama, tanlov, kontent turi) tahlil qilib takrorlang.")
+        tips.append(tip)
     if s["avg_hours_between_posts"] > 72:
         tips.append("Postlar orasidagi o'rtacha vaqt 3 kundan ko'p — muntazamlik auditoriyani ushlab turadi.")
     return tips

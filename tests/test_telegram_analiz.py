@@ -44,8 +44,8 @@ class ScraperTests(unittest.TestCase):
         self.assertEqual(info["title"], "Test Academy")
         self.assertEqual(info["subscribers"], 2500)
         self.assertIn("Sinov kanali & dasturlash\nKurslar", info["description"])
-        self.assertEqual([p.id for p in posts], [101, 102, 103])
-        first, second, third = posts
+        self.assertEqual([p.id for p in posts], [101, 102, 103, 104])
+        first, second, third, fourth = posts
         self.assertEqual(first.views, 1200)
         self.assertEqual(first.media_type, "photo")
         self.assertEqual(first.reactions, {"👍": 45, "🔥": 12})
@@ -57,6 +57,11 @@ class ScraperTests(unittest.TestCase):
         self.assertTrue(second.edited)
         self.assertEqual(third.media_type, "poll")
         self.assertEqual(third.views, 2100)
+        self.assertEqual(third.reply_to, 101)
+        self.assertEqual(third.reactions, {"✨ maxsus": 3, "⭐": 2})
+        self.assertEqual(fourth.media_type, "unsupported")
+        self.assertEqual(fourth.views, 1250)
+        self.assertEqual(fourth.text, "")
 
     def test_scrape_paginates_and_stops(self):
         calls = []
@@ -69,7 +74,7 @@ class ScraperTests(unittest.TestCase):
         self.assertEqual(calls, [None, 101])
         self.assertEqual({m.sender for m in chat.messages}, {"Test Academy"})
         self.assertEqual(chat.subscribers, 2500)
-        self.assertEqual(len(chat.messages), 3)
+        self.assertEqual(len(chat.messages), 4)
 
     def test_scrape_missing_channel(self):
         with self.assertRaises(ExportError):
@@ -81,10 +86,10 @@ class ScraperTests(unittest.TestCase):
         chat = Chat("Test Academy", "public_channel", None, posts, "test_academy", None, info["subscribers"])
         r = analyze(chat)
         ch = r["channel"]
-        self.assertEqual(ch["total_views"], 1200 + 860 + 2100)
+        self.assertEqual(ch["total_views"], 1200 + 860 + 2100 + 1250)
         self.assertEqual(ch["max_views"], 2100)
         self.assertEqual(ch["top_posts"][0]["id"], 103)
-        self.assertAlmostEqual(ch["err_pct"], round(100 * round(4160 / 3) / 2500, 1))
+        self.assertAlmostEqual(ch["err_pct"], round(100 * round(5410 / 4) / 2500, 1))
         self.assertIn(["python", 1], [[k, v] for k, v in r["content"]["top_words"]])
         self.assertIn(["#python", 1], r["content"]["top_hashtags"])
         self.assertIn(["@mentor_uz", 1], r["content"]["top_mentions"])
