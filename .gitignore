@@ -9,3 +9,6 @@ reports/*.html
 !tests/fixtures/*.html
 result.json
 .vercel
+*.session
+*.session-journal
+admin_stats*.json

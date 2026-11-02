@@ -228,3 +228,75 @@ class FilterTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertIn("id='filters'", body)
             self.assertIn("Postlar topilmadi", body)
+
+
+def _fake_admin_stats():
+    """Telegram stats.getBroadcastStats grafik formatidagi sun'iy ma'lumot (2026-09-28 — 2026-11-01)."""
+    from datetime import date, datetime, timedelta, timezone
+    days = [date(2026, 9, 28) + timedelta(days=i) for i in range(35)]
+    xs = [int(datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp() * 1000) for d in days]
+    joined = [10 + (i % 5) for i in range(35)]
+    left = [4 + (i % 3) for i in range(35)]
+    total, totals = 5000, []
+    for j, lft in zip(joined, left):
+        total += j - lft
+        totals.append(total)
+    return {
+        "channel": "@test_academy",
+        "graphs": {
+            "growth_graph": {"columns": [["x", *xs], ["y0", *totals]], "names": {"y0": "Total followers"}},
+            "followers_graph": {"columns": [["x", *xs], ["y0", *joined], ["y1", *left]],
+                                "names": {"y0": "Joined", "y1": "Left"}},
+        },
+        "enabled_notifications": {"part": 30, "total": 100},
+    }, days, joined, left, totals
+
+
+class AdminStatsTests(unittest.TestCase):
+    def test_month_summary(self):
+        from datetime import date
+        from telegram_analiz.admin_stats import daily_series, month_summary, parse_month
+        raw, days, joined, left, totals = _fake_admin_stats()
+        series = daily_series(raw)
+        self.assertEqual(len(series), 35)
+        start, end = parse_month("2026-10")
+        s = month_summary(series, start, end)
+        oct_idx = [i for i, d in enumerate(days) if d.month == 10]
+        self.assertTrue(s["complete"])
+        self.assertEqual(s["start_total"], totals[oct_idx[0] - 1])  # 30-sentabr oxiridagi son
+        self.assertFalse(s["start_estimated"])
+        self.assertEqual(s["end_total"], totals[oct_idx[-1]])
+        self.assertEqual(s["joined"], sum(joined[i] for i in oct_idx))
+        self.assertEqual(s["left"], sum(left[i] for i in oct_idx))
+        self.assertEqual(s["total_change"], s["joined"] - s["left"])
+        self.assertEqual(s["mismatch"], 0)
+        self.assertEqual(len(s["days"]), 31)
+        self.assertEqual(parse_month(None, date(2026, 11, 2)), (date(2026, 10, 1), date(2026, 10, 31)))
+        with self.assertRaises(ExportError):
+            month_summary(series, *parse_month("2025-01"))
+        with self.assertRaises(ExportError):
+            parse_month("oktabr")
+
+    def test_partial_month_and_estimated_start(self):
+        from telegram_analiz.admin_stats import daily_series, month_summary, parse_month
+        raw, days, joined, left, totals = _fake_admin_stats()
+        s = month_summary(daily_series(raw), *parse_month("2026-11"))
+        self.assertFalse(s["complete"])
+        self.assertEqual(s["to"], "2026-11-01")
+        s = month_summary(daily_series(raw), *parse_month("2026-09"))
+        self.assertTrue(s["start_estimated"])
+        self.assertEqual(s["start_total"], totals[0] - (joined[0] - left[0]))
+
+    def test_cli_from_json(self):
+        from telegram_analiz.admin_stats import main as admin_main
+        raw, *_ = _fake_admin_stats()
+        with tempfile.TemporaryDirectory() as d:
+            src, out_html, out_json = Path(d) / "raw.json", Path(d) / "o.html", Path(d) / "o.json"
+            src.write_text(json.dumps(raw), encoding="utf-8")
+            self.assertEqual(admin_main(["--from-json", str(src), "--month", "2026-10",
+                                         "--html", str(out_html), "--json", str(out_json)]), 0)
+            page = out_html.read_text(encoding="utf-8")
+            self.assertIn("Oy boshida", page)
+            self.assertIn("<svg", page)
+            self.assertEqual(json.loads(out_json.read_text(encoding="utf-8"))["month"], "2026-10")
+            self.assertEqual(admin_main(["--from-json", str(src), "--month", "2024-01"]), 1)

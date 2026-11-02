@@ -66,6 +66,33 @@ Vercel funksiyasi 60 soniya bilan cheklangani uchun veb-versiya oxirgi 600 tagac
 npx vercel deploy --prod
 ```
 
+## Obunachilar: qo'shilgan, chiqib ketgan, oy boshi/oxiri (admin uchun)
+
+Bu ma'lumot ochiq sahifada yo'q — faqat kanal adminlariga Telegram statistikasida ko'rinadi.
+Shuning uchun o'z akkauntingiz bilan **o'z kompyuteringizda** ishga tushirasiz:
+
+1. https://my.telegram.org → **API development tools** → `api_id` va `api_hash` oling.
+2. Telethon'ni o'rnating:
+
+```bash
+pip install telethon
+```
+
+3. Ishga tushiring (birinchi marta telefon raqam va Telegram yuborgan kod so'raladi):
+
+```bash
+python -m telegram_analiz.admin_stats @junior_academy --month 2026-10 --api-id 12345 --api-hash abcdef... --html obunachilar.html --save-json admin_stats.json
+```
+
+Natija: oy boshidagi va oxiridagi obunachilar, qo'shilganlar, chiqib ketganlar, sof o'zgarish,
+chiqib ketish foizi, kunlik grafik va jadval. `--save-json` bilan saqlangan fayldan keyin
+login qilmasdan boshqa oylarni ham ko'rish mumkin: `--from-json admin_stats.json --month 2026-09`.
+
+* Akkauntingiz kanalda **admin** bo'lishi kerak.
+* `telegram_analiz.session` fayli akkauntingizga kirish kalitidir — hech kimga bermang, GitHub'ga yuklamang
+  (`.gitignore` da bor).
+* Telegram statistikasi odatda oxirgi bir necha oyni qamraydi; eski oylar bo'lmasligi mumkin.
+
 ## 2. Chat eksportini tahlil qilish
 
 Telegram Desktop → chat → ⋮ → **Export chat history** → Format: **Machine-readable JSON**.
