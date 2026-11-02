@@ -264,6 +264,8 @@ def render_toolbar(
     meta: list[str],
     refresh_href: str,
     warnings: list[str] | None = None,
+    fetched_ts: int | None = None,
+    next_ts: int | None = None,
 ) -> str:
     """Yandex Direct dashboardidagi kabi panel: sarlavha, holat qatori, tayyor davrlar, sana/oy/tur."""
     from urllib.parse import urlencode
@@ -331,12 +333,27 @@ function ago(){document.querySelectorAll('[data-ago]').forEach(function(el){
   var min=Math.floor((Date.now()/1000-+el.dataset.ago)/60);
   el.textContent=min<1?'hozirgina':min<60?min+' daqiqa oldin':Math.floor(min/60)+' soat oldin';});}
 ago();setInterval(ago,30000);
+var tb=document.querySelector('.tb'),dataTs=+(tb&&tb.dataset.ts||0),nextTs=+(tb&&tb.dataset.next||0);
+function getV(){try{return +(localStorage.getItem('tg-v')||0);}catch(e){return 0;}}
+function setV(v){try{localStorage.setItem('tg-v',String(v));}catch(e){}}
+var url=new URL(location.href),v=+(url.searchParams.get('v')||0);
+if(v)setV(v);
+// "Yangilash" boshqa sahifada bosilgan bo'lsa, eski (keshdagi) sahifani yangisiga almashtiramiz.
+var lastV=getV();
+if(!v&&lastV>dataTs&&nextTs&&lastV>=nextTs-1200){url.searchParams.set('v',lastV);location.replace(url.toString());}
 var r=document.getElementById('tb-refresh');
 if(r)r.addEventListener('click',function(){var u=new URL(r.href,location.href);
-  u.searchParams.set('refresh',Date.now());r.href=u.pathname+u.search;});
+  u.searchParams.set('refresh',Date.now());r.href=u.pathname+u.search;r.textContent='↻ Yangilanmoqda…';});
+// Har 20 daqiqada (keyingi yangilanish vaqtida) sahifani o'zi qayta yuklaydi.
+function reload(){var u=new URL(location.href);u.searchParams.delete('v');u.searchParams.delete('refresh');
+  location.replace(u.toString());}
+if(nextTs){var wait=Math.max(5000,(nextTs+15)*1000-Date.now());
+  setTimeout(function(){if(document.hidden){document.addEventListener('visibilitychange',function h(){
+    if(!document.hidden){document.removeEventListener('visibilitychange',h);reload();}});}else reload();},wait);}
 })();</script>"""
+    data_attrs = (f" data-ts='{fetched_ts}'" if fetched_ts else "") + (f" data-next='{next_ts}'" if next_ts else "")
     return (
-        "<header class='tb'>"
+        f"<header class='tb'{data_attrs}>"
         f"<div class='tb-top'><h1>{esc(title)}</h1>"
         f"<a id='tb-refresh' class='btn-ghost' href='{esc(refresh_href)}'>↻ Yangilash</a></div>"
         f"<p class='tb-meta'>{''.join(f'<span>{x}</span>' for x in meta)}</p>"

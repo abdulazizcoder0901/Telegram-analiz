@@ -64,6 +64,10 @@ oy tanlash, sanalar oralig'i, post turi va **↻ Yangilash**. Ko'rsatkichlar sol
 ↑/↓ bilan chiqadi (shu oy → o'tgan oy, oy → oldingi oy, N kun → oldingi N kun).
 URL parametrlari: `preset=7|14|30|today|yesterday|this_month|last_month|all`, `month=2026-10`,
 `from=2026-10-01&to=2026-10-15`, `type=photo`, `refresh=1`.
+
+Ma'lumot har 20 daqiqada (:00, :20, :40) yangilanadi; ochiq sahifa ham shu vaqtda o'zi qayta yuklanadi.
+**↻ Yangilash** postlarni shu zahoti qaytadan yig'adi va `?v=<vaqt>` ga yo'naltiradi — shundan keyingi
+barcha tugma va filtrlar aynan shu yangi ma'lumotni ko'rsatadi.
 Sayt tanlangan davr va solishtirish davrini qamrash uchun kerakli postlarni o'zi yig'adi
 (bitta so'rovda ~45 soniya, 2 500 tagacha post).
 

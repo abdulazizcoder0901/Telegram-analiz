@@ -1,4 +1,5 @@
 import json
+from urllib.parse import parse_qs, urlparse
 import tempfile
 import unittest
 from pathlib import Path
@@ -183,8 +184,10 @@ class VercelFunctionTests(unittest.TestCase):
         self.mod.fetch_page = fake_fetch
 
     def test_dashboard_html(self):
-        status, ctype, body = self.mod.run({"preset": ["all"]})
+        status, ctype, body, headers = self.mod.run({"preset": ["all"]})
         self.assertEqual(status, 200)
+        self.assertRegex(headers["Cache-Control"], r"s-maxage=\d+$")
+        self.assertIn("data-next=", body)
         self.assertEqual(self.mod.DEFAULT_CHANNEL, "junior_academy")
         self.assertIn("Junior: Telegram", body)
         self.assertIn("↻ Yangilash", body)
@@ -196,9 +199,10 @@ class VercelFunctionTests(unittest.TestCase):
         self.assertEqual(body.count("class='pill on'"), 0)  # "all" tugmalar orasida yo'q
         self.assertNotIn("<h1>Test Academy", body)
         self.assertEqual(self.mod.run({"channel": ["a b"]})[0], 400)
+        self.assertEqual(self.mod.slot_start(1200 * 5 + 7), 1200 * 5)
 
     def test_json_and_cache(self):
-        status, _, body = self.mod.run({"from": ["2026-10-01"], "to": ["2026-10-03"], "format": ["json"]})
+        status, _, body, _ = self.mod.run({"from": ["2026-10-01"], "to": ["2026-10-03"], "format": ["json"]})
         data = json.loads(body)
         self.assertEqual(data["channel"]["total_views"], 5410)
         self.assertEqual(data["filters"]["compare"], {"from": "2026-09-28", "to": "2026-09-30", "available": True})
@@ -206,15 +210,34 @@ class VercelFunctionTests(unittest.TestCase):
         n = len(self.calls)
         self.mod.run({"month": ["2026-10"], "type": ["poll"], "format": ["json"]})
         self.assertEqual(len(self.calls), n, "keshdan olinishi kerak")
-        self.mod.run({"preset": ["all"], "refresh": ["1"]})
+        # "Yangilash": qaytadan yig'adi va ?v=<olingan vaqt> ga yo'naltiradi
+        status, _, _, headers = self.mod.run({"preset": ["7"], "refresh": ["123"], "v": ["1"]})
+        self.assertEqual(status, 302)
+        self.assertGreater(len(self.calls), n)
+        loc = headers["Location"]
+        self.assertIn("preset=7", loc)
+        self.assertNotIn("refresh", loc)
+        v = int(parse_qs(urlparse(loc).query)["v"][0])
+        n = len(self.calls)
+        _, _, body, _ = self.mod.run({"preset": ["14"], "v": [str(v)]})
+        self.assertEqual(len(self.calls), n, "shu v uchun yangi kesh ishlatiladi")
+        self.assertIn(f"v={v}", body)  # tugmalar v ni olib yuradi
+        # kesh "v" dan eski bo'lsa — qayta yig'iladi
+        self.mod._CACHE[("junior_academy", "+5")]["fetched"] = v - 5
+        self.mod.run({"preset": ["14"], "v": [str(v)]})
+        self.assertGreater(len(self.calls), n)
+        # yangi 20 daqiqalik oraliq boshlansa — qayta yig'iladi
+        n = len(self.calls)
+        self.mod._CACHE[("junior_academy", "+5")]["fetched"] -= 1300
+        self.mod.run({"preset": ["14"]})
         self.assertGreater(len(self.calls), n)
 
     def test_filters(self):
-        _, _, body = self.mod.run({"month": ["2026-10"], "type": ["poll"], "format": ["json"]})
+        _, _, body, _ = self.mod.run({"month": ["2026-10"], "type": ["poll"], "format": ["json"]})
         data = json.loads(body)
         self.assertEqual(data["filters"]["posts_shown"], 1)
         self.assertEqual(data["channel"]["total_views"], 2100)
-        status, _, body = self.mod.run({"preset": ["all"], "type": ["text"]})
+        status, _, body, _ = self.mod.run({"preset": ["all"], "type": ["text"]})
         self.assertEqual(status, 200)
         self.assertIn("Postlar topilmadi", body)
 

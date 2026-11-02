@@ -5,7 +5,8 @@
     /api/analyze?month=2026-10        → tanlangan oy
     /api/analyze?from=..&to=..        → aniq sanalar
     &type=photo                       → post turi
-    &refresh=1                        → keshni chetlab o'tib qayta yig'ish
+    &refresh=1                        → hozir qaytadan yig'ish ("Yangilash"), keyin ?v=<vaqt> ga yo'naltiradi
+    &v=<unix vaqt>                    → kamida shu vaqtda olingan ma'lumotni ko'rsatish
     &format=json                      → JSON
     &channel=@boshqa_kanal            → boshqa ochiq kanal
 """
@@ -16,7 +17,7 @@ import html
 import os
 import sys
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -40,8 +41,7 @@ DEFAULT_PRESET = "30"
 TITLE = "Junior: Telegram"
 MAX_POSTS = 2500
 TIME_BUDGET = 45  # soniya; Vercel funksiyasi 60 soniyada to'xtatiladi
-CACHE_TTL = 600  # yig'ilgan postlar iliq funksiya xotirasida 10 daqiqa saqlanadi
-CDN_TTL = 900  # CDN sahifani 15 daqiqa keshlaydi
+SLOT = 1200  # ma'lumot har 20 daqiqada (:00, :20, :40) yangilanadi
 ACTION = "/api/analyze"
 
 # (kanal, tz) → {"fetched": epoch, "posts": {id: Message}, "info": dict, "complete": bool}
@@ -56,7 +56,7 @@ def _error_page(message: str, status: int) -> tuple[int, str, str]:
         f"<div class='card'><h2>Tahlil qilib bo'lmadi</h2><p>{html.escape(message)}</p>"
         "<p><a href='/'>Qaytadan urinish</a></p></div></main></body></html>"
     )
-    return status, "text/html; charset=utf-8", body
+    return status, "text/html; charset=utf-8", body, {"Cache-Control": "no-store"}
 
 
 def _oldest_date(entry: dict) -> date | None:
@@ -64,12 +64,20 @@ def _oldest_date(entry: dict) -> date | None:
     return min(m.date for m in posts.values()).date() if posts else None
 
 
-def collect(channel: str, tz_raw: str, tz, since: date | None, refresh: bool, deadline: float) -> dict:
-    """Postlarni ``since`` sanasigacha yig'adi; keshdagi postlardan davom etadi."""
+def slot_start(ts: float) -> float:
+    return ts - ts % SLOT
+
+
+def collect(channel: str, tz_raw: str, tz, since: date | None, min_fetched: float, deadline: float) -> dict:
+    """Postlarni ``since`` sanasigacha yig'adi; keshdagi postlardan davom etadi.
+
+    Kesh ``min_fetched`` dan oldin olingan bo'lsa (yangi 20 daqiqalik oraliq boshlangan yoki
+    "Yangilash" bosilgan), hammasi Telegram'dan qaytadan yig'iladi.
+    """
     key = (channel, tz_raw)
     entry = _CACHE.get(key)
     now = time.time()
-    if refresh or entry is None or now - entry["fetched"] > CACHE_TTL:
+    if entry is None or entry["fetched"] < min_fetched:
         page = fetch_page(channel, None, timeout=10)
         posts, info = parse_page(page, channel, tz)
         if not posts and not info.get("title"):
@@ -110,7 +118,8 @@ def _clock(ts: float, tz) -> str:
     return datetime.fromtimestamp(ts, tz).strftime("%H:%M")
 
 
-def run(query: dict[str, list[str]]) -> tuple[int, str, str]:
+def run(query: dict[str, list[str]]) -> tuple[int, str, str, dict[str, str]]:
+    """(status, content-type, body, qo'shimcha sarlavhalar)."""
     def q(name: str, default: str = "") -> str:
         return (query.get(name) or [default])[0].strip()
 
@@ -134,11 +143,27 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str]:
     comp = filters.comparison(today)
     since = min(d for d in (start, comp[0] if comp else None) if d) if start else None
 
+    now = time.time()
+    refresh = bool(q("refresh"))
+    try:
+        version = min(float(q("v") or 0), now)  # "Yangilash" bosilgan vaqt (server soatiga cheklangan)
+    except ValueError:
+        version = 0.0
+    min_fetched = now if refresh else max(slot_start(now), version)
+
     started = time.monotonic()
     try:
-        entry = collect(channel, tz_raw, tz, since, bool(q("refresh")), started + TIME_BUDGET)
+        entry = collect(channel, tz_raw, tz, since, min_fetched, started + TIME_BUDGET)
     except ExportError as exc:
         return _error_page(str(exc), 404 if "topilmadi" in str(exc) else 502)
+
+    if refresh:
+        # Yangi ma'lumot olindi: shu vaqtni "v" qilib qayta yo'naltiramiz, keyingi barcha
+        # havolalar (tugmalar, oy, filtrlar) aynan shu yoki undan yangi ma'lumotni ishlatadi.
+        params = {k: v[0] for k, v in query.items() if k not in ("refresh", "v") and v}
+        params["v"] = str(int(entry["fetched"]))
+        location = f"{ACTION}?{urlencode(params)}"
+        return 302, "text/plain; charset=utf-8", "", {"Location": location, "Cache-Control": "no-store"}
 
     chat = _build_chat(channel, list(entry["posts"].values()), entry["info"])
     filtered = filter_range(chat, start, end, filters.types)
@@ -162,12 +187,16 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str]:
         "posts_collected": len(entry["posts"]),
         "compare": {"from": str(comp[0]), "to": str(comp[1]), "available": compare.get("available")} if comp else None,
     }
+    fetched = entry["fetched"]
+    next_update = slot_start(now) + SLOT
+    # CDN sahifani faqat joriy 20 daqiqalik oraliq oxirigacha saqlaydi.
+    cache_headers = {"Cache-Control": f"public, max-age=0, s-maxage={max(1, int(next_update - now))}"}
+    result["data"] = {"fetched_at": int(fetched), "next_update": int(next_update)}
     if q("format") == "json":
         if compare:
             result["compare"] = {k: compare.get(k) for k in ("totals", "channel")}
-        return 200, "application/json; charset=utf-8", to_json(result)
+        return 200, "application/json; charset=utf-8", to_json(result), cache_headers
 
-    fetched = entry["fetched"]
     meta = [
         f"<b>{html.escape(format_range(start, end, today))}</b>",
         f"ma'lumot <b>{_clock(fetched, tz)} · <span data-ago='{int(fetched)}'>hozirgina</span></b>",
@@ -178,18 +207,18 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str]:
     if chat.subscribers:
         meta.append(f"<i class='dot'></i>obunachilar <b>{chat.subscribers:,}</b>".replace(",", " "))
     meta.append(f"postlar <b>{shown}</b>")
-    meta.append(f"keyingi ma'lumot <b>~{_clock(fetched + CDN_TTL, tz)}</b>")
+    meta.append(f"keyingi yangilanish <b>{_clock(next_update, tz)}</b>")
 
     warnings = []
     cov = coverage_warning(chat, filters, today, complete=entry["complete"])
     if cov:
         warnings.append(cov)
-    if end and end >= today - timedelta(days=1) and shown:
-        warnings.append("Oxirgi 1–2 kundagi postlar ko'rishlarni hali yig'moqda — ularning ko'rsatkichlari keyin oshadi.")
 
     base = {"tz": tz_raw}
     if channel != DEFAULT_CHANNEL:
         base["channel"] = channel
+    if version:
+        base["v"] = str(int(version))
     current = dict(base)
     if filters.types:
         current["type"] = filters.types[0]
@@ -208,22 +237,23 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str]:
         type_options=type_options(chat),
         months=_months(today),
         meta=meta,
-        refresh_href=f"{ACTION}?{urlencode(current | {'refresh': str(int(time.time()))})}",
+        refresh_href=f"{ACTION}?{urlencode({k: v for k, v in current.items() if k != 'v'} | {'refresh': '1'})}",
         warnings=warnings,
+        fetched_ts=int(fetched),
+        next_ts=int(next_update),
     )
     page = to_html(result, top_html=toolbar, show_header=False, compare=compare)
-    return 200, "text/html; charset=utf-8", page
+    return 200, "text/html; charset=utf-8", page, cache_headers
 
 
 class handler(BaseHTTPRequestHandler):  # Vercel shu nomni qidiradi
     def do_GET(self):
-        status, content_type, body = run(parse_qs(urlparse(self.path).query))
+        status, content_type, body, headers = run(parse_qs(urlparse(self.path).query))
         data = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
-        if status == 200:
-            # Bir xil so'rov 15 daqiqa davomida CDN keshidan beriladi.
-            self.send_header("Cache-Control", f"public, s-maxage={CDN_TTL}, stale-while-revalidate=3600")
+        for name, value in headers.items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
