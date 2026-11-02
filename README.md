@@ -30,6 +30,8 @@ python -m telegram_analiz @junior_academy --tz +5 --html junior_academy.html --j
 * `--limit 2000` — nechta oxirgi postni yig'ish (standart 1000)
 * `--tz +5` — vaqtlarni Toshkent vaqtida ko'rsatish (standart: kompyuteringiz vaqt zonasi)
 * `--delay 1` — sahifalar orasidagi pauza (Telegram cheklamasligi uchun)
+* `--period 30` yoki `--from 2026-01-01 --to 2026-03-31` — davr bo'yicha filtr
+* `--type video_file` — post turi bo'yicha filtr (`text`, `photo`, `video_file`, `video_message`, `poll`, …; takrorlash mumkin)
 
 Ma'lumot `https://t.me/s/<kanal>` ochiq veb-sahifasidan olinadi, shuning uchun faqat
 **ochiq (public)** kanallar ishlaydi va internetda `t.me` ochilishi kerak.
@@ -56,6 +58,8 @@ python -m telegram_analiz --saved-html sahifa.html --name junior_academy --tz +5
 
 `public/index.html` — kanal nomi kiritiladigan sahifa, `api/analyze.py` — tahlil funksiyasi
 (`/api/analyze?channel=@kanal&limit=300&tz=+5`, JSON uchun `&format=json`).
+Hisobot tepasida filtrlar bor: davr (7/30/90/365 kun yoki sanalar), post turi va yig'iladigan postlar soni
+(`&period=30`, `&from=2026-01-01&to=2026-03-31`, `&type=photo`).
 Vercel funksiyasi 60 soniya bilan cheklangani uchun veb-versiya oxirgi 600 tagacha postni tahlil qiladi.
 
 ```bash

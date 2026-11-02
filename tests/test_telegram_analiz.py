@@ -180,3 +180,51 @@ class VercelFunctionTests(unittest.TestCase):
             self.assertEqual(json.loads(body)["channel"]["total_views"], 5410)
         self.assertEqual(mod.run({})[0], 400)
         self.assertEqual(mod.run({"channel": ["a b"]})[0], 400)
+
+
+class FilterTests(unittest.TestCase):
+    def setUp(self):
+        from telegram_analiz.loader import Chat
+        posts, info = parse_page((FIX / "channel_page.html").read_text(encoding="utf-8"), "test_academy", parse_tz("UTC"))
+        self.chat = Chat("Test Academy", "public_channel", None, posts, "test_academy", None, info["subscribers"])
+
+    def test_parse_filters(self):
+        from telegram_analiz.filters import parse_filters
+        f = parse_filters("30")
+        self.assertEqual((f.period, f.types), ("30", []))
+        self.assertEqual(parse_filters("bogus").period, "all")
+        f = parse_filters("7", "2026-10-03", "2026-10-01", ["all", "photo", "photo"])
+        self.assertEqual(f.period, "custom")
+        self.assertEqual((str(f.date_from), str(f.date_to)), ("2026-10-01", "2026-10-03"))
+        self.assertEqual(f.types, ["photo"])
+
+    def test_apply_period_and_type(self):
+        from datetime import date
+        from telegram_analiz.filters import apply_filters, coverage_warning, parse_filters, type_options
+        today = date(2026, 10, 3)
+        ids = lambda f: [m.id for m in apply_filters(self.chat, f, today).messages]
+        self.assertEqual(ids(parse_filters("all")), [101, 102, 103, 104])
+        self.assertEqual(ids(parse_filters(None, "2026-10-02", "2026-10-02")), [102])
+        self.assertEqual(ids(parse_filters("all", types=["text"])), [])
+        self.assertEqual(ids(parse_filters("all", types="poll")), [103])
+        self.assertEqual(ids(parse_filters("7", types=["photo", "video_file"])), [101, 102])
+        self.assertIsNotNone(coverage_warning(self.chat, parse_filters("30"), today))
+        self.assertIsNone(coverage_warning(self.chat, parse_filters("all"), today))
+        self.assertEqual({k for k, _, _ in type_options(self.chat)}, {"photo", "video_file", "poll", "unsupported"})
+
+    def test_api_filters(self):
+        import importlib.util
+        from unittest import mock
+        spec = importlib.util.spec_from_file_location("api_analyze2", Path(__file__).parent.parent / "api" / "analyze.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        page = (FIX / "channel_page.html").read_text(encoding="utf-8")
+        with mock.patch("telegram_analiz.scraper.fetch_page", lambda c, b, timeout=10: page if b is None else ""):
+            status, _, body = mod.run({"channel": ["test_academy"], "type": ["poll"], "format": ["json"]})
+            data = json.loads(body)
+            self.assertEqual(data["filters"]["posts_shown"], 1)
+            self.assertEqual(data["channel"]["total_views"], 2100)
+            status, _, body = mod.run({"channel": ["test_academy"], "type": ["text"]})
+            self.assertEqual(status, 200)
+            self.assertIn("id='filters'", body)
+            self.assertIn("Postlar topilmadi", body)

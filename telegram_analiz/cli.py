@@ -12,7 +12,10 @@ import argparse
 import sys
 from pathlib import Path
 
+from datetime import date
+
 from .analyzer import analyze
+from .filters import apply_filters, parse_filters
 from .loader import ExportError, load_chats, select_chat
 from .report import to_html, to_json, to_text
 from .scraper import load_saved_html, normalize_channel, parse_tz, scrape_channel
@@ -33,6 +36,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--delay", type=float, default=1.0, help="sahifalar orasidagi pauza, soniya")
     p.add_argument("--tz", help="kanal vaqtlari uchun vaqt zonasi, masalan +5 yoki Asia/Tashkent "
                    "(standart: kompyuter vaqt zonasi)")
+    p.add_argument("--period", choices=["all", "7", "30", "90", "365"], default="all",
+                   help="faqat oxirgi N kun postlari")
+    p.add_argument("--from", dest="date_from", metavar="YYYY-MM-DD", help="shu sanadan boshlab")
+    p.add_argument("--to", dest="date_to", metavar="YYYY-MM-DD", help="shu sanagacha")
+    p.add_argument("--type", action="append", metavar="TUR",
+                   help="post turi: text, photo, video_file, video_message, poll, voice_message... (takrorlash mumkin)")
     p.add_argument("--top", type=int, default=10, help="TOP ro'yxatlar uzunligi")
     p.add_argument("--html", metavar="FAYL", help="HTML hisobotni saqlash")
     p.add_argument("--json", metavar="FAYL", help="to'liq statistikani JSON qilib saqlash")
@@ -80,6 +89,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Xato: {exc}", file=sys.stderr)
         return 1
 
+    filters = parse_filters(args.period, args.date_from, args.date_to, args.type)
+    if filters.active:
+        total = len(chat.messages)
+        chat = apply_filters(chat, filters)
+        print(f"Filtr: {' · '.join(filters.describe(date.today()))} — {len(chat.messages)} / {total} post",
+              file=sys.stderr)
     result = analyze(chat, top_n=args.top)
     if not args.quiet:
         print(to_text(result, top_n=args.top))

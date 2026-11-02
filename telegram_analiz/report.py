@@ -225,19 +225,101 @@ a{color:var(--accent);text-decoration:none}a:hover,a:focus-visible{text-decorati
 .chip{display:inline-block;background:var(--chip);border-radius:999px;padding:3px 10px;margin:3px;font-size:13px}.chip b{font-family:var(--font-num);font-weight:600}
 .tips{border-color:var(--accent)}ul.tips-list{margin:0;padding-left:20px;max-width:75ch}ul.tips-list li{margin:7px 0}
 .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}.two .card{margin:0}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.filters{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--card);border:1px solid var(--line);border-radius:10px;
+padding:12px 14px;margin:0 0 20px;box-shadow:0 6px 18px -14px rgba(0,0,0,.35)}
+.f-row{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end}
+.f{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 140px}
+.f label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.f select,.f input{font:500 14px var(--font-body);padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--fg);width:100%;min-width:0}
+.f-actions{flex:0 0 auto;flex-direction:row;align-items:center;gap:12px}
+.f-actions button{font:600 14px var(--font-body);padding:9px 16px;border:0;border-radius:7px;background:var(--accent);color:var(--card);cursor:pointer}
+.f-actions button[disabled]{opacity:.7;cursor:progress}
+.f select:focus-visible,.f input:focus-visible,.f-actions button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.f-actions a{font-size:14px}
+.f-summary{margin:10px 0 0;font-size:13px;color:var(--muted)}.f-summary b{color:var(--fg);font-family:var(--font-num)}
+.f-warn{margin:8px 0 0;font-size:13px;color:var(--warn)}
+@media (max-width:560px){.filters{position:static}.f{flex-basis:calc(50% - 6px)}.f-actions{flex-basis:100%}}
 """
 
 
-def to_html(r: dict[str, Any]) -> str:
+def render_filter_bar(
+    *,
+    action: str,
+    hidden: dict[str, str],
+    filters: Any,
+    today: Any,
+    type_options: list[tuple[str, str, int]],
+    limit: int | None = None,
+    limit_choices: tuple[int, ...] = (100, 300, 600),
+    shown: int | None = None,
+    total: int | None = None,
+    warning: str | None = None,
+) -> str:
+    """Hisobot tepasidagi filtrlar formasi (GET bilan serverga yuboriladi)."""
+    from .filters import PERIODS
+
+    esc = html.escape
+    period_opts = "".join(
+        f"<option value='{k}'{' selected' if filters.period == k else ''}>{esc(label)}</option>"
+        for k, (label, _) in PERIODS.items()
+    )
+    selected_type = filters.types[0] if filters.types else "all"
+    type_opts = f"<option value='all'{' selected' if selected_type == 'all' else ''}>Barcha turlar</option>" + "".join(
+        f"<option value='{esc(k)}'{' selected' if k == selected_type else ''}>{esc(label)} ({n})</option>"
+        for k, label, n in type_options
+    )
+    start, end = filters.bounds(today)
+    fields = [
+        f"<div class='f'><label for='f-period'>Davr</label><select id='f-period' name='period'>{period_opts}</select></div>",
+        f"<div class='f'><label for='f-from'>Dan</label><input id='f-from' type='date' name='from' value='{start or ''}'></div>",
+        f"<div class='f'><label for='f-to'>Gacha</label><input id='f-to' type='date' name='to' value='{end or ''}'></div>",
+        f"<div class='f'><label for='f-type'>Post turi</label><select id='f-type' name='type'>{type_opts}</select></div>",
+    ]
+    if limit is not None:
+        limit_opts = "".join(
+            f"<option value='{n}'{' selected' if n == limit else ''}>oxirgi {n}</option>" for n in limit_choices
+        )
+        fields.append(
+            f"<div class='f'><label for='f-limit'>Yig'iladigan postlar</label><select id='f-limit' name='limit'>{limit_opts}</select></div>"
+        )
+    hidden_html = "".join(f"<input type='hidden' name='{esc(k)}' value='{esc(v)}'>" for k, v in hidden.items())
+    reset_q = "&".join(f"{esc(k)}={esc(v)}" for k, v in hidden.items())
+    summary = ""
+    if shown is not None and total is not None:
+        desc = " · ".join(filters.describe(today)) or "filtrsiz"
+        summary = f"<p class='f-summary'><b>{shown}</b> / {total} post · {esc(desc)}</p>"
+    warn = f"<p class='f-warn'>{esc(warning)}</p>" if warning else ""
+    script = (
+        "<script>(function(){var f=document.getElementById('filters');if(!f)return;"
+        "var p=f.querySelector('#f-period'),a=f.querySelector('#f-from'),b=f.querySelector('#f-to');"
+        "p.addEventListener('change',function(){if(p.value!=='custom'){a.value='';b.value='';}f.requestSubmit();});"
+        "[a,b].forEach(function(x){x.addEventListener('change',function(){p.value='custom';});});"
+        "f.querySelectorAll('#f-type,#f-limit').forEach(function(x){x.addEventListener('change',function(){f.requestSubmit();});});"
+        "f.addEventListener('submit',function(){if(p.value!=='custom'){a.disabled=true;b.disabled=true;}"
+        "var btn=f.querySelector('button');btn.disabled=true;btn.textContent='Yuklanmoqda…';});"
+        "window.addEventListener('pageshow',function(){a.disabled=false;b.disabled=false;"
+        "var btn=f.querySelector('button');btn.disabled=false;btn.textContent='Qo‘llash';});})();</script>"
+    )
+    return (
+        f"<form id='filters' class='filters' method='get' action='{esc(action)}'>{hidden_html}"
+        f"<div class='f-row'>{''.join(fields)}"
+        f"<div class='f f-actions'><button type='submit'>Qo‘llash</button>"
+        f"<a href='{esc(action)}?{reset_q}'>Tozalash</a></div></div>{summary}{warn}</form>{script}"
+    )
+
+
+def to_html(r: dict[str, Any], top_html: str = "") -> str:
     c, t = r["chat"], r["totals"]
     esc = html.escape
     title = c["name"]
     sub = f"@{c['username']}" if c.get("username") else c.get("type", "")
-    body: list[str] = [f"<h1>{esc(title)}</h1><div class='muted'>{esc(sub)}</div>"]
+    body: list[str] = [top_html, f"<h1>{esc(title)}</h1><div class='muted'>{esc(sub)}</div>"]
     if c.get("description"):
         body.append(f"<p class='muted desc'>{esc(c['description'])}</p>")
     if not t.get("messages"):
-        body.append("<p>Xabarlar topilmadi.</p>")
+        body.append("<div class='card'><h2>Postlar topilmadi</h2><p class='muted'>Tanlangan filtrlarga mos post yo'q. "
+                    "Davrni kengaytiring yoki boshqa post turini tanlang.</p></div>")
         return _page(title, body)
 
     ch = r.get("channel")
