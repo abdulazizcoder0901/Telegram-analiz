@@ -63,10 +63,16 @@ class HistoryStore:
 
 
 def store_from_env(env: dict[str, str] | None = None) -> HistoryStore | None:
+    """KV_REST_API_URL/TOKEN, UPSTASH_REDIS_REST_URL/TOKEN yoki istalgan prefiksli
+    <PREFIKS>_REST_API_URL/<PREFIKS>_REST_API_TOKEN juftligini topadi."""
     env = os.environ if env is None else env
-    url = env.get("KV_REST_API_URL") or env.get("UPSTASH_REDIS_REST_URL")
-    token = env.get("KV_REST_API_TOKEN") or env.get("UPSTASH_REDIS_REST_TOKEN")
-    return HistoryStore(url, token) if url and token else None
+    pairs = [("KV_REST_API_URL", "KV_REST_API_TOKEN"), ("UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN")]
+    pairs += [(k, k[: -len("URL")] + "TOKEN") for k in sorted(env)
+              if k.endswith("_REST_API_URL") and not k.startswith("KV_")]
+    for url_key, token_key in pairs:
+        if env.get(url_key) and env.get(token_key):
+            return HistoryStore(env[url_key], env[token_key])
+    return None
 
 
 def merge(stored: dict[date, dict[str, Any]], fresh: dict[date, dict[str, Any]]) -> dict[date, dict[str, Any]]:

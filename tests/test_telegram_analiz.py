@@ -428,6 +428,9 @@ class FollowersTests(unittest.TestCase):
         self.assertEqual(len(merged), 2)
         self.assertIsNone(store_from_env({}))
         self.assertIsNotNone(store_from_env({"KV_REST_API_URL": "u", "KV_REST_API_TOKEN": "t"}))
+        s2 = store_from_env({"STORAGE_REST_API_URL": "https://s", "STORAGE_REST_API_TOKEN": "t2"})
+        self.assertEqual((s2.url, s2.token), ("https://s", "t2"))
+        self.assertIsNone(store_from_env({"STORAGE_REST_API_URL": "https://s"}))
 
     def _api(self, configured=True, fail=False):
         from unittest import mock
