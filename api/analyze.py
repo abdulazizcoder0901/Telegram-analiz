@@ -242,7 +242,7 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str, dict[str, str]]:
         fetched_ts=int(fetched),
         next_ts=int(next_update),
     )
-    page = to_html(result, top_html=toolbar, show_header=False, compare=compare)
+    page = to_html(result, top_html=toolbar, show_header=False, compare=compare, web=True)
     return 200, "text/html; charset=utf-8", page, cache_headers
 
 

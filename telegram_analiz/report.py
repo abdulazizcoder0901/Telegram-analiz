@@ -248,6 +248,12 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .tb select:focus-visible,.tb input:focus-visible,.tb button:focus-visible,.pill:focus-visible,.btn-ghost:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .tb-warn{margin:0;font-size:13px;color:var(--warn)}
 @media (max-width:760px){.tb-row{grid-template-columns:1fr 1fr}.tb-row .dash{display:none}.tb-row .wide{grid-column:1/-1}.pill.shift{grid-column:1/-1}}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:0 0 4px}
+.tabs [role=tab]{font:600 15px var(--font-body);padding:10px 16px;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;background:none;color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.tabs [role=tab]:hover{color:var(--fg)}
+.tabs [role=tab][aria-selected=true]{color:var(--fg);border-bottom-color:var(--accent)}
+.tabs [role=tab]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.badge{font:600 12px var(--font-num);background:var(--chip);color:var(--fg);border-radius:999px;padding:1px 8px}
 .kpi .d{font:500 12px var(--font-num);margin-top:4px;color:var(--muted)}.kpi .d.up{color:var(--good)}.kpi .d.down{color:var(--bad)}
 """
 
@@ -404,8 +410,9 @@ def _legacy_kpis(c: dict[str, Any], t: dict[str, Any], ch: dict[str, Any] | None
 
 
 def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
-            compare: dict[str, Any] | None = None) -> str:
-    """compare berilsa (sayt), KPI'lar solishtirish davriga nisbatan o'zgarish bilan chiqadi."""
+            compare: dict[str, Any] | None = None, web: bool = False) -> str:
+    """web=True (sayt): "Asosiy"/"Tavsiyalar" bo'limlari va KPI'lar ostida solishtirish davriga
+    nisbatan o'zgarish (compare berilgan bo'lsa)."""
     c, t = r["chat"], r["totals"]
     esc = html.escape
     title = c["name"]
@@ -421,24 +428,37 @@ def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
         return _page(title, body)
 
     ch = r.get("channel")
-    if compare is not None and ch:
-        pc, pt = compare.get("channel") or {}, compare.get("totals") or {}
-        have = bool(compare.get("available"))
+    tabs = web and bool(ch)  # sayt: "Asosiy" va "Tavsiyalar" bo'limlari
+    if tabs:
+        n_tips = len(ch["recommendations"])
+        body.append(
+            "<div class='tabs' role='tablist' aria-label='Bo‘limlar'>"
+            "<button type='button' role='tab' id='tab-main' aria-controls='p-main' aria-selected='true'>Asosiy</button>"
+            "<button type='button' role='tab' id='tab-tips' aria-controls='p-tips' aria-selected='false'>"
+            f"Tavsiyalar<span class='badge'>{n_tips}</span></button></div>"
+            "<section id='p-main' role='tabpanel' aria-labelledby='tab-main'>"
+        )
+    if web and ch:
+        pc, pt = (compare or {}).get("channel") or {}, (compare or {}).get("totals") or {}
+        have = bool((compare or {}).get("available"))
 
         def prev(v):
             return v if have else None
 
+        # "Butun davr"da solishtiradigan davr yo'q — o'zgarish qatori ko'rsatilmaydi.
+        delta = _delta if compare is not None else (lambda *_a, **_k: "")
+
         tiles = [
-            ("Postlar", _n(t["messages"]), _delta(t["messages"], prev(pt.get("messages", 0)))),
-            ("Ko'rishlar jami", _n(ch["total_views"]), _delta(ch["total_views"], prev(pc.get("total_views", 0)))),
-            ("O'rtacha ko'rish", _n(ch["avg_views"]), _delta(ch["avg_views"], prev(pc.get("avg_views")))),
-            ("Mediana ko'rish", _n(ch["median_views"]), _delta(ch["median_views"], prev(pc.get("median_views")))),
-            ("Reaksiyalar", _n(t["reactions"]), _delta(t["reactions"], prev(pt.get("reactions", 0)))),
+            ("Postlar", _n(t["messages"]), delta(t["messages"], prev(pt.get("messages", 0)))),
+            ("Ko'rishlar jami", _n(ch["total_views"]), delta(ch["total_views"], prev(pc.get("total_views", 0)))),
+            ("O'rtacha ko'rish", _n(ch["avg_views"]), delta(ch["avg_views"], prev(pc.get("avg_views")))),
+            ("Mediana ko'rish", _n(ch["median_views"]), delta(ch["median_views"], prev(pc.get("median_views")))),
+            ("Reaksiyalar", _n(t["reactions"]), delta(t["reactions"], prev(pt.get("reactions", 0)))),
             ("Reaksiya darajasi", f"{ch['avg_reaction_rate_pct']}%",
-             _delta(ch["avg_reaction_rate_pct"], prev(pc.get("avg_reaction_rate_pct")), points=True)),
+             delta(ch["avg_reaction_rate_pct"], prev(pc.get("avg_reaction_rate_pct")), points=True)),
         ]
         if ch["err_pct"] is not None:
-            tiles.append(("ERR", f"{ch['err_pct']}%", _delta(ch["err_pct"], prev(pc.get("err_pct")), points=True)))
+            tiles.append(("ERR", f"{ch['err_pct']}%", delta(ch["err_pct"], prev(pc.get("err_pct")), points=True)))
         if c.get("subscribers"):
             tiles.append(("Obunachilar", _n(c["subscribers"]), "<div class='d'>hozir</div>"))
         body.append("<div class='grid'>" + "".join(
@@ -451,7 +471,7 @@ def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
                 f"eng faol kun {t['busiest_day']['date']} ({t['busiest_day']['messages']} ta)</p>")
 
     if ch:
-        if ch["recommendations"]:
+        if ch["recommendations"] and not tabs:
             body.append("<div class='card tips'><h2>Tavsiyalar</h2><ul class='tips-list'>" +
                         "".join(f"<li>{esc(x)}</li>" for x in ch["recommendations"]) + "</ul></div>")
         if t["span_days"] <= 62 and ch.get("views_by_day"):
@@ -515,8 +535,69 @@ def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
                        ("top_reactions", "Reaksiyalar")]:
         if cn.get(key):
             body.append(f"<div class='card'><h2>{label}</h2>{_chips(cn[key])}</div>")
+    if tabs:
+        body.append("</section>")
+        body.append(_tips_panel(ch))
+        body.append(TABS_SCRIPT)
     body.append("<p class='muted'>telegram-analiz yordamida yaratildi.</p>")
     return _page(title, body)
+
+
+def _tips_panel(ch: dict[str, Any]) -> str:
+    """"Tavsiyalar" bo'limi: tavsiyalar ro'yxati va eng yaxshi vaqt jadvallari."""
+    esc = html.escape
+    tips = ch["recommendations"] or ["Bu davr uchun tavsiya topilmadi. Davrni kengaytirib ko'ring (masalan, 30 kun)."]
+    min_posts = max(3, round(ch["posts_with_views"] * 0.02))
+    hours = sorted((r for r in ch["views_by_hour"] if r["posts"] >= min_posts),
+                   key=lambda r: -r["avg_views"])[:5]
+    weekdays = sorted((r for r in ch["views_by_weekday"] if r["posts"] >= min(min_posts, 2)),
+                      key=lambda r: -r["avg_views"])
+    types = [r for r in ch["views_by_type"] if r["posts"] >= min(min_posts, 3)]
+    parts = [
+        "<section id='p-tips' role='tabpanel' aria-labelledby='tab-tips' hidden>",
+        "<div class='card tips'><h2>Tavsiyalar</h2><ul class='tips-list'>"
+        + "".join(f"<li>{esc(x)}</li>" for x in tips) + "</ul></div>",
+        "<div class='two'>",
+    ]
+    if hours:
+        parts.append("<div class='card'><h2>Post chiqarish uchun eng yaxshi soatlar</h2>" + _table(
+            ["Soat", "Postlar", "O'rt. ko'rish"],
+            [[f"{r['key']:02d}:00", r["posts"], r["avg_views"]] for r in hours]) +
+            f"<p class='muted note'>Kamida {min_posts} ta post chiqqan soatlar hisobga olingan.</p></div>")
+    if weekdays:
+        parts.append("<div class='card'><h2>Hafta kunlari</h2>" + _table(
+            ["Kun", "Postlar", "O'rt. ko'rish"],
+            [[r["key"], r["posts"], r["avg_views"]] for r in weekdays]) + "</div>")
+    parts.append("</div>")
+    if types:
+        parts.append("<div class='card'><h2>Qaysi post turi ko'proq ko'riladi</h2>" + _table(
+            ["Tur", "Postlar", "O'rt. ko'rish", "Mediana"],
+            [[r["key"], r["posts"], r["avg_views"], r["median_views"]] for r in types]) + "</div>")
+    parts.append("</section>")
+    return "".join(parts)
+
+
+TABS_SCRIPT = """<script>(function(){
+var tabs={main:document.getElementById('tab-main'),tips:document.getElementById('tab-tips')},
+    panels={main:document.getElementById('p-main'),tips:document.getElementById('p-tips')};
+if(!tabs.main||!tabs.tips)return;
+function withHash(href,hash){var u=new URL(href,location.href);u.hash=hash;return u.pathname+u.search+u.hash;}
+function show(name,save){
+  ['main','tips'].forEach(function(k){var on=k===name;tabs[k].setAttribute('aria-selected',on);
+    tabs[k].tabIndex=on?0:-1;panels[k].hidden=!on;});
+  var hash=name==='tips'?'#tavsiyalar':'';
+  if(save)history.replaceState(null,'',location.pathname+location.search+hash);
+  // Filtr, oy va "Yangilash" havolalari tanlangan bo'limni saqlab qoladi.
+  document.querySelectorAll('.pills a.pill,#tb-refresh').forEach(function(a){a.href=withHash(a.href,hash);});
+  var f=document.getElementById('tb-form');if(f)f.action=withHash(f.getAttribute('action').split('#')[0],hash);
+}
+tabs.main.addEventListener('click',function(){show('main',true);});
+tabs.tips.addEventListener('click',function(){show('tips',true);});
+document.querySelector('.tabs').addEventListener('keydown',function(e){
+  if(e.key==='ArrowRight'||e.key==='ArrowLeft'){var n=tabs.main.getAttribute('aria-selected')==='true'?'tips':'main';
+    show(n,true);tabs[n].focus();}});
+show(location.hash==='#tavsiyalar'?'tips':'main',false);
+})();</script>"""
 
 
 def _page(title: str, body: list[str]) -> str:

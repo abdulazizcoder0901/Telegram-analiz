@@ -198,6 +198,13 @@ class VercelFunctionTests(unittest.TestCase):
             self.assertIn(label, text)
         self.assertEqual(body.count("class='pill on'"), 0)  # "all" tugmalar orasida yo'q
         self.assertNotIn("<h1>Test Academy", body)
+        # "Asosiy" va "Tavsiyalar" bo'limlari; tavsiyalar asosiy qismda takrorlanmaydi
+        self.assertIn("id='tab-main'", body)
+        self.assertIn("id='tab-tips'", body)
+        main_part = body.split("<section id='p-main'")[1].split("</section>")[0]
+        tips_part = body.split("<section id='p-tips'")[1].split("</section>")[0]
+        self.assertNotIn("<h2>Tavsiyalar</h2>", main_part)
+        self.assertIn("<h2>Tavsiyalar</h2>", tips_part)
         self.assertEqual(self.mod.run({"channel": ["a b"]})[0], 400)
         self.assertEqual(self.mod.slot_start(1200 * 5 + 7), 1200 * 5)
 
@@ -231,6 +238,13 @@ class VercelFunctionTests(unittest.TestCase):
         self.mod._CACHE[("junior_academy", "+5")]["fetched"] -= 1300
         self.mod.run({"preset": ["14"]})
         self.assertGreater(len(self.calls), n)
+
+    def test_dashboard_with_comparison(self):
+        status, _, body, _ = self.mod.run({"from": ["2026-10-01"], "to": ["2026-10-03"]})
+        self.assertEqual(status, 200)
+        self.assertIn("class='d", body)  # KPI ostida o'zgarish qatori
+        self.assertIn("solishtirish <b>", body)
+        self.assertIn("id='p-tips'", body)
 
     def test_filters(self):
         _, _, body, _ = self.mod.run({"month": ["2026-10"], "type": ["poll"], "format": ["json"]})
