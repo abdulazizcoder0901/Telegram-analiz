@@ -52,6 +52,16 @@ python -m telegram_analiz --saved-html sahifa.html --name junior_academy --tz +5
 * Heshteglar, @eslatmalar, havola domenlari, ko'p ishlatilgan so'zlar, emoji
 * Avtomatik **tavsiyalar**
 
+## Veb-versiya (Vercel)
+
+`public/index.html` — kanal nomi kiritiladigan sahifa, `api/analyze.py` — tahlil funksiyasi
+(`/api/analyze?channel=@kanal&limit=300&tz=+5`, JSON uchun `&format=json`).
+Vercel funksiyasi 60 soniya bilan cheklangani uchun veb-versiya oxirgi 600 tagacha postni tahlil qiladi.
+
+```bash
+npx vercel deploy --prod
+```
+
 ## 2. Chat eksportini tahlil qilish
 
 Telegram Desktop → chat → ⋮ → **Export chat history** → Format: **Machine-readable JSON**.

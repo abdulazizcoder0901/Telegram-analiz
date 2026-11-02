@@ -1,0 +1,101 @@
+"""Vercel serverless funksiyasi: /api/analyze?channel=@kanal&limit=300
+
+Ochiq kanalni t.me/s dan yig'ib, HTML hisobot (yoki ?format=json bilan JSON) qaytaradi.
+"""
+
+from __future__ import annotations
+
+import html
+import os
+import sys
+import time
+from http.server import BaseHTTPRequestHandler
+from urllib.parse import parse_qs, urlparse
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from telegram_analiz.analyzer import analyze  # noqa: E402
+from telegram_analiz.loader import ExportError  # noqa: E402
+from telegram_analiz.report import CSS, to_html, to_json  # noqa: E402
+from telegram_analiz.scraper import normalize_channel, parse_tz, scrape_channel  # noqa: E402
+
+MAX_POSTS = 600
+DEFAULT_POSTS = 300
+TIME_BUDGET = 45  # soniya; Vercel funksiyasi 60 soniyada to'xtatiladi
+
+NAV = (
+    "<nav class='topnav'><a href='/'>← Boshqa kanal</a>"
+    "<span class='muted'>{note}</span></nav>"
+)
+EXTRA_CSS = (
+    ".topnav{display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:space-between;"
+    "align-items:baseline;margin-bottom:20px;font-size:14px}"
+)
+
+
+def _error_page(message: str, status: int) -> tuple[int, str, str]:
+    body = (
+        "<!doctype html><html lang='uz'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        f"<title>Xato</title><style>{CSS}{EXTRA_CSS}</style></head><body><main>"
+        "<nav class='topnav'><a href='/'>← Bosh sahifa</a></nav>"
+        f"<div class='card'><h2>Tahlil qilib bo'lmadi</h2><p>{html.escape(message)}</p></div>"
+        "</main></body></html>"
+    )
+    return status, "text/html; charset=utf-8", body
+
+
+def run(query: dict[str, list[str]]) -> tuple[int, str, str]:
+    raw = (query.get("channel") or [""])[0].strip()
+    if not raw:
+        return _error_page("Kanal nomini kiriting, masalan @junior_academy.", 400)
+    try:
+        channel = normalize_channel(raw)
+        tz = parse_tz((query.get("tz") or ["+5"])[0])
+    except ExportError as exc:
+        return _error_page(str(exc), 400)
+    try:
+        limit = max(20, min(MAX_POSTS, int((query.get("limit") or [DEFAULT_POSTS])[0])))
+    except ValueError:
+        limit = DEFAULT_POSTS
+
+    started = time.monotonic()
+    pages = 0
+
+    def fetch_with_budget(name, before):
+        nonlocal pages
+        from telegram_analiz.scraper import fetch_page
+
+        if pages and time.monotonic() - started > TIME_BUDGET:
+            return ""  # vaqt tugadi — shu paytgacha yig'ilganini tahlil qilamiz
+        pages += 1
+        return fetch_page(name, before, timeout=10)
+
+    try:
+        chat = scrape_channel(channel, max_posts=limit, delay=0.15, fetch=fetch_with_budget, tz=tz)
+    except ExportError as exc:
+        return _error_page(str(exc), 404 if "topilmadi" in str(exc) else 502)
+
+    result = analyze(chat, top_n=10)
+    if (query.get("format") or [""])[0] == "json":
+        return 200, "application/json; charset=utf-8", to_json(result)
+
+    note = f"Oxirgi {len(chat.messages)} ta post · vaqtlar UTC{(query.get('tz') or ['+5'])[0]}"
+    page = to_html(result)
+    page = page.replace("</style>", EXTRA_CSS + "</style>", 1)
+    page = page.replace("<main>", "<main>" + NAV.format(note=html.escape(note)), 1)
+    return 200, "text/html; charset=utf-8", page
+
+
+class handler(BaseHTTPRequestHandler):  # Vercel shu nomni qidiradi
+    def do_GET(self):
+        status, content_type, body = run(parse_qs(urlparse(self.path).query))
+        data = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        if status == 200:
+            # Bir xil so'rov 15 daqiqa davomida CDN keshidan beriladi.
+            self.send_header("Cache-Control", "public, s-maxage=900, stale-while-revalidate=3600")
+        self.end_headers()
+        self.wfile.write(data)

@@ -5,6 +5,7 @@ build/
 dist/
 .venv/
 reports/
-*.html
+reports/*.html
 !tests/fixtures/*.html
 result.json
+.vercel

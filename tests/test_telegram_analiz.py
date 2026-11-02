@@ -160,3 +160,23 @@ class ExportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VercelFunctionTests(unittest.TestCase):
+    def test_run(self):
+        import importlib.util
+        from unittest import mock
+
+        spec = importlib.util.spec_from_file_location("api_analyze", Path(__file__).parent.parent / "api" / "analyze.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        page = (FIX / "channel_page.html").read_text(encoding="utf-8")
+        with mock.patch("telegram_analiz.scraper.fetch_page", lambda c, b, timeout=10: page if b is None else ""):
+            status, ctype, body = mod.run({"channel": ["@test_academy"], "limit": ["100"]})
+            self.assertEqual(status, 200)
+            self.assertIn("Test Academy", body)
+            self.assertIn("Boshqa kanal", body)
+            status, ctype, body = mod.run({"channel": ["test_academy"], "format": ["json"]})
+            self.assertEqual(json.loads(body)["channel"]["total_views"], 5410)
+        self.assertEqual(mod.run({})[0], 400)
+        self.assertEqual(mod.run({"channel": ["a b"]})[0], 400)
