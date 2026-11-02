@@ -119,7 +119,7 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str]:
         warning=coverage_warning(chat, filters, today),
     )
     note = f"Vaqtlar UTC{tz_raw}"
-    page = to_html(result, top_html=bar)
+    page = to_html(result, top_html=bar, show_header=False)
     page = page.replace("</style>", EXTRA_CSS + "</style>", 1)
     page = page.replace("<main>", "<main>" + NAV.format(note=html.escape(note)), 1)
     return 200, "text/html; charset=utf-8", page

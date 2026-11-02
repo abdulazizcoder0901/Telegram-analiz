@@ -309,14 +309,16 @@ def render_filter_bar(
     )
 
 
-def to_html(r: dict[str, Any], top_html: str = "") -> str:
+def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True) -> str:
     c, t = r["chat"], r["totals"]
     esc = html.escape
     title = c["name"]
     sub = f"@{c['username']}" if c.get("username") else c.get("type", "")
-    body: list[str] = [top_html, f"<h1>{esc(title)}</h1><div class='muted'>{esc(sub)}</div>"]
-    if c.get("description"):
-        body.append(f"<p class='muted desc'>{esc(c['description'])}</p>")
+    body: list[str] = [top_html]
+    if show_header:
+        body.append(f"<h1>{esc(title)}</h1><div class='muted'>{esc(sub)}</div>")
+        if c.get("description"):
+            body.append(f"<p class='muted desc'>{esc(c['description'])}</p>")
     if not t.get("messages"):
         body.append("<div class='card'><h2>Postlar topilmadi</h2><p class='muted'>Tanlangan filtrlarga mos post yo'q. "
                     "Davrni kengaytiring yoki boshqa post turini tanlang.</p></div>")

@@ -174,8 +174,9 @@ class VercelFunctionTests(unittest.TestCase):
         with mock.patch("telegram_analiz.scraper.fetch_page", lambda c, b, timeout=10: page if b is None else ""):
             status, ctype, body = mod.run({"channel": ["@test_academy"], "limit": ["100"]})
             self.assertEqual(status, 200)
-            self.assertIn("Test Academy", body)
             self.assertIn("Vaqtlar UTC+5", body)
+            self.assertNotIn("<h1>", body)  # saytda kanal sarlavhasi ko'rsatilmaydi
+            self.assertIn("<title>Test Academy tahlili</title>", body)
             status, ctype, body = mod.run({"channel": ["test_academy"], "format": ["json"]})
             self.assertEqual(json.loads(body)["channel"]["total_views"], 5410)
         self.assertEqual(mod.DEFAULT_CHANNEL, "junior_academy")
