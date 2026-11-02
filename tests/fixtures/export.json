@@ -1,0 +1,17 @@
+{
+  "name": "Sinov guruhi",
+  "type": "private_group",
+  "id": 42,
+  "messages": [
+    {"id": 1, "type": "service", "date": "2026-01-05T09:00:00", "actor": "Ali", "actor_id": "user1", "action": "create_group", "text": ""},
+    {"id": 2, "type": "message", "date": "2026-01-05T09:01:00", "from": "Ali", "from_id": "user1", "text": "Salom hammaga! 😀"},
+    {"id": 3, "type": "message", "date": "2026-01-05T09:03:00", "from": "Vali", "from_id": "user2", "text": ["Salom ", {"type": "bold", "text": "Ali"}, " qalaysan?"], "reply_to_message_id": 2, "reactions": [{"type": "emoji", "count": 2, "emoji": "👍"}]},
+    {"id": 4, "type": "message", "date": "2026-01-05T09:10:00", "from": "Ali", "from_id": "user1", "text": "Yaxshi, python kursini ko'rdingmi? https://example.uz/python", "text_entities": [{"type": "link", "text": "https://example.uz/python"}]},
+    {"id": 5, "type": "message", "date": "2026-01-06T21:00:00", "from": "Vali", "from_id": "user2", "text": "", "media_type": "voice_message", "file": "voice.ogg"},
+    {"id": 6, "type": "message", "date": "2026-01-06T21:05:00", "from": "Ali", "from_id": "user1", "text": "python juda zo'r #python", "edited": "2026-01-06T21:06:00"},
+    {"id": 7, "type": "message", "date": "2026-01-06T21:07:00", "from": "Vali", "from_id": "user2", "text": "Rasm", "photo": "photo.jpg"},
+    {"id": 8, "type": "message", "date": "2026-01-07T08:00:00", "from": "Ali", "from_id": "user1", "text": "Ertalab dars bor", "forwarded_from": "Junior Kanal"},
+    {"id": 9, "type": "message", "date": "2026-01-07T08:30:00", "from": "Vali", "from_id": "user2", "text": "Xo'p, kelaman"},
+    {"id": 10, "type": "message", "date": "2026-01-07T08:31:00", "from": "Ali", "from_id": "user1", "text": "Kutaman"}
+  ]
+}

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telegram-analiz"
+version = "0.1.0"
+description = "Telegram kanal va chatlarini tahlil qilish (ochiq kanallar va Telegram Desktop eksporti)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+telegram-analiz = "telegram_analiz.cli:main"
+
+[tool.setuptools]
+packages = ["telegram_analiz"]
