@@ -255,6 +255,17 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .tabs [role=tab]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .badge{font:600 12px var(--font-num);background:var(--chip);color:var(--fg);border-radius:999px;padding:1px 8px}
 .kpi .d{font:500 12px var(--font-num);margin-top:4px;color:var(--muted)}.kpi .d.up{color:var(--good)}.kpi .d.down{color:var(--bad)}
+.kpi .v.up{color:var(--good)}.kpi .v.down{color:var(--bad)}
+.sec{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:22px 0 0;font-weight:600}
+.followers .grid{margin-top:10px}
+.chart.div rect.up{fill:var(--good)}.chart.div rect.down{fill:var(--bad)}
+.chart .axis{stroke:var(--line);stroke-width:1}.chart .grid{stroke:var(--line);stroke-dasharray:3 4}
+.chart.line .stroke{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linejoin:round}
+.chart.line .area{fill:var(--accent);fill-opacity:.12}.chart.line .dot{fill:var(--accent)}
+.legend{display:flex;gap:16px;font-size:13px;color:var(--muted);margin:0 0 8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+details.card summary{cursor:pointer;font-weight:600}details.card[open] summary{margin-bottom:10px}
+.setup{border-style:dashed}
 """
 
 
@@ -368,6 +379,112 @@ if(nextTs){var wait=Math.max(5000,(nextTs+15)*1000-Date.now());
     )
 
 
+def render_followers_block(
+    *,
+    summary: dict[str, Any] | None,
+    raw: dict[str, Any] | None,
+    sources: list[tuple[str, float]] | None = None,
+    error: str | None = None,
+    configured: bool = True,
+    fetched_label: str = "",
+) -> str:
+    """Saytdagi "Obunachilar" bo'limi (Telegram admin statistikasi)."""
+    from .admin_stats import _signed, _svg_diverging, _svg_line
+    from .filters import format_range
+
+    esc = html.escape
+    head = "<section class='followers'><h2 class='sec'>Obunachilar</h2>"
+    if not configured:
+        return (head + "<div class='card setup'><p>Qo'shilgan va chiqib ketgan obunachilar, oy boshidagi son — "
+                "Telegram admin statistikasidan olinadi va hali ulanmagan. Vercel'ga <b>TG_API_ID</b>, "
+                "<b>TG_API_HASH</b> va <b>TG_SESSION</b> qo'shilgach shu yerda chiqadi (README: "
+                "“Obunachilar statistikasi”).</p></div></section>")
+    if summary is None:
+        msg = error or "Bu davr uchun Telegram statistikasi yo'q."
+        return head + f"<div class='card'><p class='muted'>{esc(msg)}</p></div></section>"
+
+    def num(v):
+        return _n(int(v)) if v is not None else "—"
+
+    def tg_delta(v: dict[str, Any] | None) -> str:
+        if not v or v.get("previous") in (None, 0):
+            return ""
+        diff = v["current"] - v["previous"]
+        pct = abs(diff) / v["previous"] * 100
+        cls = "up" if diff > 0 else "down" if diff < 0 else ""
+        sign = "+" if diff > 0 else "−" if diff < 0 else ""
+        return f"<div class='d {cls}'>{sign}{_n(round(abs(diff)))} ({pct:.2f}%)</div>"
+
+    raw = raw or {}
+    start = summary["from"]
+    month_start = start.endswith("-01")
+    change = summary["total_change"] if summary["total_change"] is not None else summary["net"]
+    tiles = [
+        ("Obunachilar", num((raw.get("followers") or {}).get("current") or summary["end_total"]),
+         "", tg_delta(raw.get("followers"))),
+        ("Oy boshida" if month_start else "Davr boshida", num(summary["start_total"]), "",
+         f"<div class='d'>{esc(start)}</div>"),
+        ("Davr oxirida", num(summary["end_total"]), "", f"<div class='d'>{esc(summary['to'])}</div>"),
+        ("Qo'shildi", "+" + num(summary["joined"]), "up", ""),
+        ("Chiqib ketdi", "−" + num(summary["left"]), "down", ""),
+        ("Sof o'zgarish", _signed(change), "up" if change and change > 0 else "down" if change and change < 0 else "",
+         f"<div class='d'>{summary['growth_pct']:+.2f}%</div>" if summary.get("growth_pct") is not None else ""),
+    ]
+    en = raw.get("enabled_notifications") or {}
+    if en.get("total"):
+        tiles.append(("Bildirishnoma yoqilgan", f"{100 * en['part'] / en['total']:.2f}%", "", ""))
+    overview = [("Post boshiga ko'rish", raw.get("views_per_post")),
+                ("Post boshiga ulashish", raw.get("shares_per_post")),
+                ("Post boshiga reaksiya", raw.get("reactions_per_post"))]
+    for label, v in overview:
+        if v and v.get("current") is not None:
+            tiles.append((label, num(v["current"]), "", tg_delta(v)))
+
+    parts = [head, "<div class='grid'>" + "".join(
+        f"<div class='kpi'><div class='k'>{esc(k)}</div><div class='v {c}'>{esc(v)}</div>{d}</div>"
+        for k, v, c, d in tiles) + "</div>"]
+
+    days = summary["days"]
+    labels = [d["date"][8:10] + "." + d["date"][5:7] for d in days]
+    line = _svg_line(labels, [d["total"] for d in days])
+    div = _svg_diverging(labels, [d["joined"] or 0 for d in days], [d["left"] or 0 for d in days])
+    parts.append("<div class='two'>")
+    if line:
+        parts.append(f"<div class='card'><h2>Jami obunachilar</h2>{line}</div>")
+    parts.append("<div class='card'><h2>Har kuni qo'shilgan va chiqib ketgan</h2>"
+                 "<div class='legend'><span><i style='background:var(--good)'></i>Qo'shildi</span>"
+                 f"<span><i style='background:var(--bad)'></i>Chiqib ketdi</span></div>{div}</div>")
+    parts.append("</div>")
+    rows = [[d["date"], num(d["total"]), "+" + num(d["joined"]) if d["joined"] is not None else "—",
+             "−" + num(d["left"]) if d["left"] is not None else "—", _signed(d["net"])] for d in reversed(days)]
+    parts.append("<details class='card'><summary>Kunlar bo'yicha jadval</summary>" +
+                 _table(["Sana", "Jami", "Qo'shildi", "Chiqdi", "Sof"], rows) + "</details>")
+    if sources:
+        total = sum(v for _, v in sources) or 1
+        parts.append("<div class='card'><h2>Yangi obunachilar qayerdan keldi</h2>" + _table(
+            ["Manba", "Obunachilar", "Ulush"],
+            [[name, int(v), f"{100 * v / total:.1f}%"] for name, v in sources]) + "</div>")
+    notes = []
+    if not summary["complete"]:
+        notes.append(f"Statistika davrning faqat {format_range(date_of(summary['from']), date_of(summary['to']))} "
+                     "qismini qamraydi.")
+    if raw.get("period"):
+        notes.append("Post boshiga ko'rsatkichlar va o'zgarishlar — Telegram'ning o'z davri: "
+                     f"{raw['period']['min'][:10]} — {raw['period']['max'][:10]}, oldingi shuncha kunga nisbatan.")
+    if fetched_label:
+        notes.append(f"Telegram admin statistikasi · {fetched_label}")
+    if error:
+        notes.append(error)
+    parts.append("".join(f"<p class='muted note'>{esc(n)}</p>" for n in notes))
+    parts.append("</section><h2 class='sec'>Postlar</h2>")
+    return "".join(parts)
+
+
+def date_of(value: str):
+    from datetime import date as _date
+    return _date.fromisoformat(value[:10])
+
+
 def _delta(cur: float | None, prev: float | None, points: bool = False) -> str:
     """KPI ostidagi o'zgarish: ↑ 12% / ↓ 3 p.p."""
     if cur is None or prev is None:
@@ -410,7 +527,7 @@ def _legacy_kpis(c: dict[str, Any], t: dict[str, Any], ch: dict[str, Any] | None
 
 
 def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
-            compare: dict[str, Any] | None = None, web: bool = False) -> str:
+            compare: dict[str, Any] | None = None, web: bool = False, main_top_html: str = "") -> str:
     """web=True (sayt): "Asosiy"/"Tavsiyalar" bo'limlari va KPI'lar ostida solishtirish davriga
     nisbatan o'zgarish (compare berilgan bo'lsa)."""
     c, t = r["chat"], r["totals"]
@@ -423,6 +540,7 @@ def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
         if c.get("description"):
             body.append(f"<p class='muted desc'>{esc(c['description'])}</p>")
     if not t.get("messages"):
+        body.append(main_top_html)
         body.append("<div class='card'><h2>Postlar topilmadi</h2><p class='muted'>Tanlangan filtrlarga mos post yo'q. "
                     "Davrni kengaytiring yoki boshqa post turini tanlang.</p></div>")
         return _page(title, body)
@@ -437,6 +555,7 @@ def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
             "<button type='button' role='tab' id='tab-tips' aria-controls='p-tips' aria-selected='false'>"
             f"Tavsiyalar<span class='badge'>{n_tips}</span></button></div>"
             "<section id='p-main' role='tabpanel' aria-labelledby='tab-main'>"
+            + main_top_html
         )
     if web and ch:
         pc, pt = (compare or {}).get("channel") or {}, (compare or {}).get("totals") or {}
@@ -459,7 +578,7 @@ def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
         ]
         if ch["err_pct"] is not None:
             tiles.append(("ERR", f"{ch['err_pct']}%", delta(ch["err_pct"], prev(pc.get("err_pct")), points=True)))
-        if c.get("subscribers"):
+        if c.get("subscribers") and "class='followers'" not in main_top_html:
             tiles.append(("Obunachilar", _n(c["subscribers"]), "<div class='d'>hozir</div>"))
         body.append("<div class='grid'>" + "".join(
             f"<div class='kpi'><div class='k'>{esc(k)}</div><div class='v'>{esc(v)}</div>{d}</div>"

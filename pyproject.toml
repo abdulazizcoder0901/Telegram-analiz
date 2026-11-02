@@ -8,10 +8,7 @@ version = "0.1.0"
 description = "Telegram kanal va chatlarini tahlil qilish (ochiq kanallar va Telegram Desktop eksporti)"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
-
-[project.optional-dependencies]
-admin = ["telethon>=1.40"]
+dependencies = ["telethon>=1.40"]  # admin statistikasi (obunachilar) uchun
 
 [project.scripts]
 telegram-analiz = "telegram_analiz.cli:main"

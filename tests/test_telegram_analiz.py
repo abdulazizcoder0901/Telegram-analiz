@@ -1,4 +1,5 @@
 import json
+import os
 from urllib.parse import parse_qs, urlparse
 import tempfile
 import unittest
@@ -381,3 +382,105 @@ class AdminStatsTests(unittest.TestCase):
             self.assertIn("<svg", page)
             self.assertEqual(json.loads(out_json.read_text(encoding="utf-8"))["month"], "2026-10")
             self.assertEqual(admin_main(["--from-json", str(src), "--month", "2024-01"]), 1)
+
+
+class FakeRedis:
+    """Upstash REST API'ga o'xshatilgan soxta server (urllib opener o'rniga)."""
+
+    def __init__(self):
+        self.data = {}
+
+    def __call__(self, request, timeout=None):
+        import io
+        cmd = json.loads(request.data.decode("utf-8"))
+        if cmd[0] == "HSET":
+            h = self.data.setdefault(cmd[1], {})
+            for k, v in zip(cmd[2::2], cmd[3::2]):
+                h[k] = v
+            result = len(cmd[2:]) // 2
+        elif cmd[0] == "HGETALL":
+            result = [x for kv in self.data.get(cmd[1], {}).items() for x in kv]
+        else:
+            result = None
+
+        class R(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return R(json.dumps({"result": result}).encode())
+
+
+class FollowersTests(unittest.TestCase):
+    def test_history_store_roundtrip_and_merge(self):
+        from datetime import date
+        from telegram_analiz.history import HistoryStore, merge, store_from_env
+        fake = FakeRedis()
+        store = HistoryStore("https://x.upstash.io", "t", opener=fake)
+        store.save("@Junior_Academy", {date(2026, 10, 1): {"total": 6000, "joined": 5, "left": 2}})
+        loaded = store.load("junior_academy")
+        self.assertEqual(loaded, {date(2026, 10, 1): {"total": 6000, "joined": 5, "left": 2}})
+        merged = merge(loaded, {date(2026, 10, 1): {"total": 6001, "joined": None, "left": 3},
+                                date(2026, 10, 2): {"total": 6004, "joined": 4, "left": 1}})
+        self.assertEqual(merged[date(2026, 10, 1)], {"total": 6001, "joined": 5, "left": 3})
+        self.assertEqual(len(merged), 2)
+        self.assertIsNone(store_from_env({}))
+        self.assertIsNotNone(store_from_env({"KV_REST_API_URL": "u", "KV_REST_API_TOKEN": "t"}))
+
+    def _api(self, configured=True, fail=False):
+        from unittest import mock
+        mod = _load_api()
+        page = (FIX / "channel_page.html").read_text(encoding="utf-8")
+        mod.fetch_page = lambda channel, before, timeout=10: page if before is None else ""
+        raw, *_ = _fake_admin_stats()
+        raw["followers"] = {"current": 5237, "previous": 5292}
+        raw["views_per_post"] = {"current": 1000, "previous": 1408}
+        xs = raw["graphs"]["followers_graph"]["columns"][0]
+        raw["graphs"]["new_followers_by_source_graph"] = {
+            "columns": [xs, ["y0", *[2] * (len(xs) - 1)], ["y1", *[1] * (len(xs) - 1)]],
+            "names": {"y0": "Search", "y1": "Channels"}}
+
+        def fake_fetch(channel):
+            if fail:
+                raise RuntimeError("tarmoq xatosi")
+            return raw
+        mod.fetch_admin = fake_fetch
+        env = {"TG_API_ID": "1", "TG_API_HASH": "h", "TG_SESSION": "s" * 100} if configured else {}
+        return mod, mock.patch.dict(os.environ, env, clear=False), raw
+
+    def test_not_configured(self):
+        mod, env, _ = self._api(configured=False)
+        with env:
+            for k in ("TG_API_ID", "TG_API_HASH", "TG_SESSION"):
+                os.environ.pop(k, None)
+            _, _, body, _ = mod.run({"month": ["2026-10"]})
+        self.assertIn("hali ulanmagan", body)
+
+    def test_followers_block(self):
+        mod, env, raw = self._api()
+        with env:
+            _, _, body, _ = mod.run({"month": ["2026-10"]})
+            _, _, js, _ = mod.run({"month": ["2026-10"], "format": ["json"]})
+        f = json.loads(js)["followers"]
+        self.assertEqual(f["from"], "2026-10-01")
+        self.assertIsNotNone(f["start_total"])
+        self.assertEqual(f["total_change"], f["joined"] - f["left"])
+        import html as _h
+        text = _h.unescape(body)
+        for label in ("Obunachilar", "Oy boshida", "Qo'shildi", "Chiqib ketdi", "Sof o'zgarish",
+                      "Bildirishnoma yoqilgan", "Post boshiga ko'rish", "Har kuni qo'shilgan va chiqib ketgan",
+                      "Kunlar bo'yicha jadval", "Yangi obunachilar qayerdan keldi", "Search"):
+            self.assertIn(label, text)
+        self.assertIn("−55 (1.04%)", text)  # Telegram'dagidek o'zgarish
+        main_part = body.split("<section id='p-main'")[1]
+        self.assertLess(main_part.index("class='followers'"), main_part.index("<h2 class='sec'>Postlar</h2>"))
+
+    def test_admin_error_does_not_break_dashboard(self):
+        mod, env, _ = self._api(fail=True)
+        with env:
+            status, _, body, _ = mod.run({"month": ["2026-10"]})
+        self.assertEqual(status, 200)
+        self.assertIn("Telegram statistikasini olib bo", body)
+        self.assertIn("id='tab-tips'", body)

@@ -17,12 +17,14 @@ import html
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlencode, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from telegram_analiz import admin_stats, history  # noqa: E402
 from telegram_analiz.analyzer import analyze  # noqa: E402
 from telegram_analiz.filters import (  # noqa: E402
     MONTHS_FULL,
@@ -33,19 +35,86 @@ from telegram_analiz.filters import (  # noqa: E402
     type_options,
 )
 from telegram_analiz.loader import ExportError  # noqa: E402
-from telegram_analiz.report import CSS, render_toolbar, to_html, to_json  # noqa: E402
+from telegram_analiz.report import CSS, render_followers_block, render_toolbar, to_html, to_json  # noqa: E402
 from telegram_analiz.scraper import _build_chat, fetch_page, normalize_channel, parse_page, parse_tz  # noqa: E402
 
 DEFAULT_CHANNEL = "junior_academy"  # sayt ochilganda shu kanal ko'rsatiladi
 DEFAULT_PRESET = "30"
 TITLE = "Junior: Telegram"
 MAX_POSTS = 2500
-TIME_BUDGET = 45  # soniya; Vercel funksiyasi 60 soniyada to'xtatiladi
+TIME_BUDGET = 40  # soniya; Vercel funksiyasi 60 soniyada to'xtatiladi
+ADMIN_TIMEOUT = 25  # Telegram admin statistikasi (postlar bilan parallel)
 SLOT = 1200  # ma'lumot har 20 daqiqada (:00, :20, :40) yangilanadi
 ACTION = "/api/analyze"
 
 # (kanal, tz) → {"fetched": epoch, "posts": {id: Message}, "info": dict, "complete": bool}
 _CACHE: dict[tuple[str, str], dict] = {}
+# kanal → {"fetched": epoch, "raw": dict|None, "series": {date: row}, "error": str|None}
+_ADMIN: dict[str, dict] = {}
+
+
+def admin_configured(env=None) -> bool:
+    env = os.environ if env is None else env
+    return all(env.get(k) for k in ("TG_API_ID", "TG_API_HASH", "TG_SESSION"))
+
+
+def fetch_admin(channel: str) -> dict:
+    """Telegram admin statistikasi (Vercel muhitidagi TG_* kalitlari bilan)."""
+    return admin_stats.fetch_stats("@" + channel, int(os.environ["TG_API_ID"]), os.environ["TG_API_HASH"],
+                                   os.environ["TG_SESSION"], timeout=ADMIN_TIMEOUT)
+
+
+def admin_data(channel: str, min_fetched: float) -> dict | None:
+    """Admin statistikasi + saqlangan tarix. Sozlanmagan bo'lsa None."""
+    if not admin_configured():
+        return None
+    entry = _ADMIN.get(channel)
+    if entry and entry["fetched"] >= min_fetched:
+        return entry
+    store = history.store_from_env()
+    stored: dict = {}
+    store_error = None
+    if store:
+        try:
+            stored = store.load(channel)
+        except Exception as exc:  # noqa: BLE001
+            store_error = f"Tarixni o'qib bo'lmadi: {exc}"
+    try:
+        raw = fetch_admin(channel)
+        fresh = admin_stats.daily_series(raw)
+        if store:
+            try:
+                store.save(channel, fresh)
+            except Exception as exc:  # noqa: BLE001
+                store_error = f"Tarixni saqlab bo'lmadi: {exc}"
+        entry = {"fetched": time.time(), "raw": raw, "series": history.merge(stored, fresh),
+                 "error": store_error, "stored": bool(store)}
+    except Exception as exc:  # noqa: BLE001 — statistika xatosi dashboardni to'xtatmasin
+        previous = entry or {}
+        entry = {"fetched": time.time(), "raw": previous.get("raw"),
+                 "series": history.merge(stored, previous.get("series") or {}),
+                 "error": f"Telegram statistikasini olib bo'lmadi: {exc}", "stored": bool(store)}
+    _ADMIN[channel] = entry
+    return entry
+
+
+def followers_section(entry: dict | None, start: date | None, end: date | None, tz) -> tuple[str, dict | None]:
+    if entry is None:
+        return render_followers_block(summary=None, raw=None, configured=False), None
+    series = entry["series"]
+    summary = None
+    error = entry.get("error")
+    if series:
+        s, e = start or min(series), end or max(series)
+        try:
+            summary = admin_stats.month_summary(series, s, e)
+        except ExportError as exc:
+            error = str(exc)
+    sources = admin_stats.source_totals(entry["raw"] or {}, "new_followers_by_source_graph", start, end)
+    fetched = f"olingan {_clock(entry['fetched'], tz)}" + (" · tarix saqlanmoqda" if entry.get("stored") else "")
+    block = render_followers_block(summary=summary, raw=entry["raw"], sources=sources, error=error,
+                                   fetched_label=fetched)
+    return block, summary
 
 
 def _error_page(message: str, status: int) -> tuple[int, str, str]:
@@ -152,10 +221,13 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str, dict[str, str]]:
     min_fetched = now if refresh else max(slot_start(now), version)
 
     started = time.monotonic()
-    try:
-        entry = collect(channel, tz_raw, tz, since, min_fetched, started + TIME_BUDGET)
-    except ExportError as exc:
-        return _error_page(str(exc), 404 if "topilmadi" in str(exc) else 502)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        admin_future = pool.submit(admin_data, channel, min_fetched)  # postlar bilan parallel
+        try:
+            entry = collect(channel, tz_raw, tz, since, min_fetched, started + TIME_BUDGET)
+        except ExportError as exc:
+            return _error_page(str(exc), 404 if "topilmadi" in str(exc) else 502)
+        admin_entry = admin_future.result()
 
     if refresh:
         # Yangi ma'lumot olindi: shu vaqtni "v" qilib qayta yo'naltiramiz, keyingi barcha
@@ -192,6 +264,9 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str, dict[str, str]]:
     # CDN sahifani faqat joriy 20 daqiqalik oraliq oxirigacha saqlaydi.
     cache_headers = {"Cache-Control": f"public, max-age=0, s-maxage={max(1, int(next_update - now))}"}
     result["data"] = {"fetched_at": int(fetched), "next_update": int(next_update)}
+    followers_html, followers = followers_section(admin_entry, start, end, tz)
+    if followers is not None:
+        result["followers"] = followers
     if q("format") == "json":
         if compare:
             result["compare"] = {k: compare.get(k) for k in ("totals", "channel")}
@@ -242,7 +317,8 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str, dict[str, str]]:
         fetched_ts=int(fetched),
         next_ts=int(next_update),
     )
-    page = to_html(result, top_html=toolbar, show_header=False, compare=compare, web=True)
+    page = to_html(result, top_html=toolbar, show_header=False, compare=compare, web=True,
+                   main_top_html=followers_html)
     return 200, "text/html; charset=utf-8", page, cache_headers
 
 

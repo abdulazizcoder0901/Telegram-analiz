@@ -75,18 +75,41 @@ Sayt tanlangan davr va solishtirish davrini qamrash uchun kerakli postlarni o'zi
 npx vercel deploy --prod
 ```
 
-## Obunachilar: qo'shilgan, chiqib ketgan, oy boshi/oxiri (admin uchun)
+## Obunachilar statistikasi saytda (Vercel)
 
-Bu ma'lumot ochiq sahifada yo'q — faqat kanal adminlariga Telegram statistikasida ko'rinadi.
-Shuning uchun o'z akkauntingiz bilan **o'z kompyuteringizda** ishga tushirasiz:
+Saytning "Asosiy" bo'limi tepasida **Obunachilar** qismi: hozirgi son (Telegram'dagidek o'zgarish bilan),
+oy/davr boshida va oxirida, qo'shilgan, chiqib ketgan, sof o'zgarish, bildirishnoma yoqilganlar,
+post boshiga ko'rish/ulashish/reaksiya, jami obunachilar grafigi, kunlik qo'shilgan/chiqqan grafigi
+va jadvali, yangi obunachilar manbasi. Ma'lumot Telegram admin statistikasidan har 20 daqiqada olinadi.
 
-1. https://my.telegram.org → **API development tools** → `api_id` va `api_hash` oling.
-2. Telethon'ni o'rnating:
+Sozlash (bir marta):
+
+1. https://my.telegram.org → **API development tools** → `api_id` va `api_hash`.
+2. O'z kompyuteringizda sessiya kalitini yarating (telefon kodi shu yerda so'raladi):
 
 ```bash
 pip install telethon
 ```
 
+```bash
+python -m telegram_analiz.make_session
+```
+
+3. Vercel → **telegram-analiz → Settings → Environment Variables** ga qo'shing:
+   `TG_API_ID`, `TG_API_HASH`, `TG_SESSION` (Production). Keyin **Redeploy**.
+4. Tarixni saqlash uchun (ixtiyoriy, tavsiya etiladi): Vercel → **Storage → Create Database →
+   Upstash for Redis** (bepul) → loyihaga ulang. Kunlik raqamlar shu bazaga yozib boriladi.
+
+`TG_SESSION` akkauntingizga kirish kalitidir: hech kimga bermang. Bekor qilish: Telegram →
+Sozlamalar → Qurilmalar → "Junior Telegram dashboard" → Tugatish.
+
+## Obunachilar: qo'shilgan, chiqib ketgan, oy boshi/oxiri (admin uchun, buyruq qatori)
+
+Bu ma'lumot ochiq sahifada yo'q — faqat kanal adminlariga Telegram statistikasida ko'rinadi.
+Shuning uchun o'z akkauntingiz bilan **o'z kompyuteringizda** ishga tushirasiz:
+
+1. https://my.telegram.org → **API development tools** → `api_id` va `api_hash` oling.
+2. Telethon o'rnatilgan bo'lsin (`pip install telethon`).
 3. Ishga tushiring (birinchi marta telefon raqam va Telegram yuborgan kod so'raladi):
 
 ```bash

@@ -28,7 +28,8 @@ from typing import Any
 from .loader import ExportError
 from .report import _n, _page, _table
 
-GRAPHS = ("growth_graph", "followers_graph", "mute_graph", "new_followers_by_source_graph")
+GRAPHS = ("growth_graph", "followers_graph", "mute_graph", "new_followers_by_source_graph",
+          "views_by_source_graph")
 
 
 # ---------------------------------------------------------------- yig'ish (Telethon)
@@ -76,20 +77,38 @@ async def _fetch_async(client, channel: str) -> dict[str, Any]:
         "period": {"min": stats.period.min_date.isoformat(), "max": stats.period.max_date.isoformat()},
         "followers": abs_value(stats.followers),
         "views_per_post": abs_value(stats.views_per_post),
+        "shares_per_post": abs_value(getattr(stats, "shares_per_post", None)),
+        "reactions_per_post": abs_value(getattr(stats, "reactions_per_post", None)),
         "enabled_notifications": percent(stats.enabled_notifications),
         "graphs": graphs,
         "graph_errors": graph_errors,
     }
 
 
-def fetch_stats(channel: str, api_id: int, api_hash: str, session: str = "telegram_analiz") -> dict[str, Any]:
+def fetch_stats(channel: str, api_id: int, api_hash: str, session: str = "telegram_analiz",
+                timeout: float | None = None) -> dict[str, Any]:
+    """``session`` — sessiya fayli nomi yoki ``make_session`` bergan matnli kalit (StringSession)."""
     try:
         from telethon import TelegramClient, errors
+        from telethon.sessions import StringSession
     except ImportError as exc:
         raise ExportError("Telethon o'rnatilmagan. Avval: pip install telethon") from exc
 
+    is_string = len(session) > 80 and "/" not in session and not session.endswith(".session")
+    session_obj = StringSession(session) if is_string else session
+
     async def main():
-        async with TelegramClient(session, api_id, api_hash) as client:  # birinchi marta login so'raydi
+        client = TelegramClient(session_obj, api_id, api_hash)
+        if is_string:
+            # Serverda (Vercel) login so'rab bo'lmaydi: sessiya yaroqsiz bo'lsa — aniq xato.
+            await client.connect()
+            if not await client.is_user_authorized():
+                await client.disconnect()
+                raise ExportError("Telegram sessiyasi yaroqsiz yoki bekor qilingan. "
+                                  "make_session bilan yangi TG_SESSION yarating.")
+        else:
+            await client.start()  # birinchi marta telefon raqam va kod so'raydi
+        async with client:
             try:
                 return await _fetch_async(client, channel)
             except errors.ChatAdminRequiredError as exc:
@@ -100,7 +119,13 @@ def fetch_stats(channel: str, api_id: int, api_hash: str, session: str = "telegr
             except errors.BroadcastRequiredError as exc:
                 raise ExportError("Bu kanal emas (guruh). Hozircha faqat kanallar qo'llab-quvvatlanadi.") from exc
 
-    return asyncio.run(main())
+    async def bounded():
+        return await (asyncio.wait_for(main(), timeout) if timeout else main())
+
+    try:
+        return asyncio.run(bounded())
+    except asyncio.TimeoutError as exc:
+        raise ExportError("Telegram statistikasi vaqtida javob bermadi.") from exc
 
 
 # ---------------------------------------------------------------- hisoblash
@@ -144,6 +169,34 @@ def daily_series(raw: dict[str, Any]) -> dict[date, dict[str, float | None]]:
             series.setdefault(d, {"total": None, "joined": None, "left": None})["left"] = v
 
     return dict(sorted(series.items()))
+
+
+def source_totals(raw: dict[str, Any], graph_name: str, start: date | None, end: date | None) -> list[tuple[str, float]]:
+    """Manba grafigidagi (masalan new_followers_by_source_graph) har bir manba yig'indisi."""
+    graph = (raw.get("graphs") or {}).get(graph_name)
+    if not graph:
+        return []
+    days, cols, names = _columns(graph)
+    totals = []
+    for key, values in cols.items():
+        total = sum(v or 0 for d, v in zip(days, values) if (not start or d >= start) and (not end or d <= end))
+        if total:
+            totals.append((names.get(key, key), total))
+    return sorted(totals, key=lambda kv: -kv[1])
+
+
+def series_to_json(series: dict[date, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {d.isoformat(): v for d, v in series.items()}
+
+
+def series_from_json(data: dict[str, dict[str, Any]]) -> dict[date, dict[str, Any]]:
+    out = {}
+    for k, v in (data or {}).items():
+        try:
+            out[date.fromisoformat(k)] = {"total": v.get("total"), "joined": v.get("joined"), "left": v.get("left")}
+        except (ValueError, AttributeError):
+            continue
+    return dict(sorted(out.items()))
 
 
 def parse_month(value: str | None, today: date | None = None) -> tuple[date, date]:
