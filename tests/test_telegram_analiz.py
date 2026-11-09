@@ -400,6 +400,14 @@ class FakeRedis:
             result = len(cmd[2:]) // 2
         elif cmd[0] == "HGETALL":
             result = [x for kv in self.data.get(cmd[1], {}).items() for x in kv]
+        elif cmd[0] == "SET":
+            if "NX" in cmd[3:] and cmd[1] in self.data:
+                result = None
+            else:
+                self.data[cmd[1]] = cmd[2]
+                result = "OK"
+        elif cmd[0] == "GET":
+            result = self.data.get(cmd[1])
         else:
             result = None
 
@@ -487,3 +495,113 @@ class FollowersTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("Telegram statistikasini olib bo", body)
         self.assertIn("id='tab-tips'", body)
+
+
+class PlanTests(unittest.TestCase):
+    def test_clean_items_and_progress(self):
+        from datetime import date
+        from telegram_analiz import plan
+        items = plan.clean_items([{"metric": "joined", "plan": "10 000"},
+                                  {"metric": "custom", "name": " Sifatli lidlar ", "plan": "120", "actual": "37"}])
+        self.assertEqual(items, [{"metric": "joined", "name": "", "plan": 10000},
+                                 {"metric": "custom", "name": "Sifatli lidlar", "plan": 120, "actual": 37}])
+        for bad in ([{"metric": "x", "plan": 1}], [{"metric": "custom", "name": "", "plan": 1}],
+                    [{"metric": "joined", "plan": ""}], [{"metric": "joined", "plan": "-5"}], "nope",
+                    [{"metric": "joined", "plan": 1}] * 21):
+            with self.assertRaises(plan.PlanError):
+                plan.clean_items(bad)
+        today = date(2026, 11, 4)
+        self.assertEqual(plan.month_progress(2026, 11, today), {"days_total": 30, "days_elapsed": 4})
+        self.assertEqual(plan.month_progress(2026, 10, today)["days_elapsed"], 31)
+        self.assertEqual(plan.month_progress(2026, 12, today)["days_elapsed"], 0)
+        a = plan.actuals_for_month({"totals": {"messages": 5, "reactions": 9}, "channel": {"total_views": 700, "avg_views": 140}},
+                                   {"joined": 300, "left": 50, "total_change": 250, "net": 250, "end_total": 6200})
+        self.assertEqual(a, {"posts": 5, "views": 700, "avg_views": 140, "reactions": 9,
+                             "joined": 300, "left": 50, "net": 250, "end_total": 6200})
+        self.assertIsNone(plan.actuals_for_month(None, None)["joined"])
+
+    def _plan_api(self, env):
+        import importlib.util
+        from unittest import mock
+        spec = importlib.util.spec_from_file_location("api_plan", Path(__file__).parent.parent / "api" / "plan.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        fake = FakeRedis()
+        from telegram_analiz.history import HistoryStore, JSONStore
+        mod._store = lambda: JSONStore(HistoryStore("https://x", "t", opener=fake))
+        return mod, mock.patch.dict(os.environ, env, clear=False), fake
+
+    def test_api_plan_roundtrip(self):
+        mod, env, fake = self._plan_api({})
+        with env:
+            os.environ.pop("PLAN_PASSWORD", None)
+            st, d = mod.get_plan({"month": ["2026-11"]})
+            self.assertEqual((st, d["items"], d["protected"]), (200, [], False))
+            body = json.dumps({"month": "2026-11", "items": [{"metric": "joined", "plan": 10000}]}).encode()
+            st, d = mod.save_plan(body)
+            self.assertEqual((st, d["saved"]), (200, True))
+            self.assertIn("tg:junior_academy:plan:2026-11", fake.data)
+            st, d = mod.get_plan({"month": ["2026-11"], "channel": ["@junior_academy"]})
+            self.assertEqual(d["items"], [{"metric": "joined", "name": "", "plan": 10000}])
+            self.assertEqual(mod.get_plan({"month": ["2026-10"]})[1]["items"], [])
+            self.assertEqual(mod.save_plan(b"{bad")[0], 400)
+            self.assertEqual(mod.save_plan(json.dumps({"month": "x", "items": []}).encode())[0], 400)
+
+    def test_api_plan_password(self):
+        mod, env, _ = self._plan_api({"PLAN_PASSWORD": "sir"})
+        with env:
+            body = {"month": "2026-11", "items": [{"metric": "posts", "plan": 60}]}
+            self.assertEqual(mod.save_plan(json.dumps(body).encode())[0], 403)
+            self.assertEqual(mod.save_plan(json.dumps(body | {"password": "xato"}).encode())[0], 403)
+            self.assertEqual(mod.save_plan(json.dumps(body | {"password": "sir"}).encode())[0], 200)
+            self.assertTrue(mod.get_plan({"month": ["2026-11"]})[1]["protected"])
+
+    def test_dashboard_plan_tab(self):
+        mod = _load_api()
+        page = (FIX / "channel_page.html").read_text(encoding="utf-8")
+        mod.fetch_page = lambda channel, before, timeout=10: page if before is None else ""
+        _, _, body, _ = mod.run({"month": ["2026-10"]})
+        self.assertIn("id='tab-plan'", body)
+        self.assertLess(body.index("id='tab-plan'"), body.index("id='tab-tips'"))  # Plan Tavsiyalardan oldin
+        ctx = json.loads(body.split("<script type='application/json' id='plan-ctx'>")[1].split("</script>")[0])
+        self.assertEqual(ctx["month"], "2026-10")
+        self.assertEqual(ctx["actuals"]["posts"], 4)
+        self.assertEqual(ctx["actuals"]["views"], 5410)
+        self.assertIn("month=2026-09", ctx["prev_href"])
+        self.assertTrue(ctx["next_href"].endswith("#plan"))
+        _, _, js, _ = mod.run({"month": ["2026-10"], "format": ["json"]})
+        self.assertEqual(json.loads(js)["plan_context"]["days_total"], 31)
+
+
+class FrozenMonthStartTests(unittest.TestCase):
+    def test_month_start_does_not_change_when_telegram_revises_history(self):
+        from datetime import date
+        from unittest import mock
+        from telegram_analiz.admin_stats import daily_series
+        from telegram_analiz.history import HistoryStore
+        mod, env, raw = FollowersTests._api(FollowersTests())
+        fake = FakeRedis()
+        with env, mock.patch.object(mod.history, "store_from_env", lambda *a: HistoryStore("https://x", "t", opener=fake)):
+            _, _, js, _ = mod.run({"month": ["2026-10"], "format": ["json"]})
+            first = json.loads(js)["followers"]
+            self.assertEqual(first["start_frozen_on"], mod.datetime.now(mod.parse_tz("+5")).date().isoformat())
+            self.assertIn("tg:junior_academy:month_start:2026-10", fake.data)
+
+            # Telegram eski kunlarni "tuzatdi": barcha jami sonlar 40 ga kamaydi
+            growth = raw["graphs"]["growth_graph"]["columns"][1]
+            raw["graphs"]["growth_graph"]["columns"][1] = [growth[0]] + [v - 40 for v in growth[1:]]
+            mod._FROZEN.clear()  # yangi Vercel nusxasi — faqat bazadagi qiymat qoladi
+            _, _, js, _ = mod.run({"month": ["2026-10"], "format": ["json"], "refresh": ["1"]})
+            # refresh 302 qaytaradi; keyingi so'rov yangi ma'lumot bilan
+            _, _, js, _ = mod.run({"month": ["2026-10"], "format": ["json"]})
+            second = json.loads(js)["followers"]
+        self.assertEqual(second["start_total"], first["start_total"])          # oy boshi o'zgarmadi
+        self.assertEqual(second["end_total"], first["end_total"] - 40)          # oy oxiri yangilandi
+        self.assertEqual(second["total_change"], second["end_total"] - second["start_total"])
+
+    def test_apply_start_recomputes(self):
+        from telegram_analiz.admin_stats import apply_start
+        s = apply_start({"end_total": 1100, "joined": 150, "left": 40, "start_total": 990, "start_estimated": True},
+                        1000, "2026-11-01")
+        self.assertEqual((s["start_total"], s["total_change"], s["mismatch"]), (1000, 100, -10))
+        self.assertEqual((s["churn_pct"], s["growth_pct"], s["start_estimated"]), (4.0, 10.0, False))

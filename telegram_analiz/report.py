@@ -266,6 +266,39 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
 details.card summary{cursor:pointer;font-weight:600}details.card[open] summary{margin-bottom:10px}
 .setup{border-style:dashed}
+.plan-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:18px 0 6px}
+.plan-title{font-size:20px;margin:0}.plan-sub{margin:4px 0 0;font-size:14px}
+.plan-nav{display:flex;gap:16px;font-size:14px}
+.plan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:10px 0}
+.plan-grid .card{margin:0}.plan-empty h2{margin-bottom:6px}
+.pcard{display:grid;gap:10px}.pk{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.pv{font:600 24px/1.2 var(--font-num);font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.pv .muted{font-size:16px;font-weight:500}.ppct{margin-left:auto;font-size:15px;color:var(--fg)}
+.pbar{position:relative;height:10px;border-radius:999px;background:var(--chip);overflow:visible}
+.pbar i{position:absolute;inset:0 auto 0 0;border-radius:999px;background:var(--accent)}
+.pbar.good i{background:var(--good)}.pbar.bad i{background:var(--bad)}
+.pbar s{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;background:var(--fg);opacity:.55;text-decoration:none}
+.pmeta{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:14px;color:var(--muted)}
+.pmeta b{color:var(--fg);font-family:var(--font-num)}
+.pstat{font-size:12px;font-weight:600;padding:2px 10px;border-radius:999px;background:var(--chip);color:var(--fg)}
+.pstat.ahead,.pstat.ok,.pstat.done{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}
+.pstat.behind,.pstat.missed{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+.plines{display:grid;grid-template-columns:1fr auto;gap:4px 12px;margin:0;font-size:13px}
+.plines dt{color:var(--muted)}.plines dd{margin:0;font-family:var(--font-num);font-variant-numeric:tabular-nums;text-align:right}
+.plan-edit{margin-top:16px}
+.plan-rows-head,.plan-row{display:grid;grid-template-columns:minmax(200px,2fr) minmax(90px,1fr) minmax(90px,1fr) 36px;gap:8px;align-items:center}
+.plan-rows-head{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+.plan-row{margin-bottom:8px}.pr-metric{display:grid;gap:6px;min-width:0}
+.plan-row select,.plan-row input{font:500 14px var(--font-body);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);width:100%;min-width:0}
+.pr-auto{font-size:13px;font-family:var(--font-num)}
+.pr-del{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:8px;height:36px;font-size:18px;cursor:pointer}
+.pr-del:hover{color:var(--bad);border-color:var(--bad)}
+.plan-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px}
+.plan-actions input{font:500 14px var(--font-body);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+#plan-save{font:600 14px var(--font-body);padding:9px 18px;border:0;border-radius:8px;background:var(--accent);color:var(--on-accent);cursor:pointer}
+#plan-save[disabled]{opacity:.6;cursor:progress}
+.plan-row :focus-visible,#plan-save:focus-visible,.pr-del:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (max-width:640px){.plan-rows-head{display:none}.plan-row{grid-template-columns:1fr 1fr 36px}.pr-metric{grid-column:1/-1}}
 """
 
 
@@ -465,6 +498,9 @@ def render_followers_block(
             ["Manba", "Obunachilar", "Ulush"],
             [[name, int(v), f"{100 * v / total:.1f}%"] for name, v in sources]) + "</div>")
     notes = []
+    if summary.get("start_frozen_on"):
+        notes.append(f"Oy boshidagi son ({summary['from']} holati) {summary['start_frozen_on']} da qayd etilgan va "
+                     "boshqa o'zgarmaydi; sof o'zgarish shu songa nisbatan hisoblanadi.")
     if not summary["complete"]:
         notes.append(f"Statistika davrning faqat {format_range(date_of(summary['from']), date_of(summary['to']))} "
                      "qismini qamraydi.")
@@ -527,7 +563,8 @@ def _legacy_kpis(c: dict[str, Any], t: dict[str, Any], ch: dict[str, Any] | None
 
 
 def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
-            compare: dict[str, Any] | None = None, web: bool = False, main_top_html: str = "") -> str:
+            compare: dict[str, Any] | None = None, web: bool = False, main_top_html: str = "",
+            plan_html: str = "") -> str:
     """web=True (sayt): "Asosiy"/"Tavsiyalar" bo'limlari va KPI'lar ostida solishtirish davriga
     nisbatan o'zgarish (compare berilgan bo'lsa)."""
     c, t = r["chat"], r["totals"]
@@ -540,23 +577,22 @@ def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
         if c.get("description"):
             body.append(f"<p class='muted desc'>{esc(c['description'])}</p>")
     if not t.get("messages"):
-        body.append(main_top_html)
-        body.append("<div class='card'><h2>Postlar topilmadi</h2><p class='muted'>Tanlangan filtrlarga mos post yo'q. "
-                    "Davrni kengaytiring yoki boshqa post turini tanlang.</p></div>")
+        empty = ("<div class='card'><h2>Postlar topilmadi</h2><p class='muted'>Tanlangan filtrlarga mos post yo'q. "
+                 "Davrni kengaytiring yoki boshqa post turini tanlang.</p></div>")
+        if web:
+            body.append(_tabs_open(0, bool(plan_html)) + main_top_html + empty + "</section>")
+            body.append(plan_html)
+            body.append("<section id='p-tips' role='tabpanel' aria-labelledby='tab-tips' hidden>"
+                        "<div class='card'><p class='muted'>Bu davr uchun tavsiya yo'q.</p></div></section>")
+            body.append(TABS_SCRIPT)
+        else:
+            body.append(main_top_html + empty)
         return _page(title, body)
 
     ch = r.get("channel")
-    tabs = web and bool(ch)  # sayt: "Asosiy" va "Tavsiyalar" bo'limlari
+    tabs = web and bool(ch)  # sayt: "Asosiy", "Plan" va "Tavsiyalar" bo'limlari
     if tabs:
-        n_tips = len(ch["recommendations"])
-        body.append(
-            "<div class='tabs' role='tablist' aria-label='Bo‘limlar'>"
-            "<button type='button' role='tab' id='tab-main' aria-controls='p-main' aria-selected='true'>Asosiy</button>"
-            "<button type='button' role='tab' id='tab-tips' aria-controls='p-tips' aria-selected='false'>"
-            f"Tavsiyalar<span class='badge'>{n_tips}</span></button></div>"
-            "<section id='p-main' role='tabpanel' aria-labelledby='tab-main'>"
-            + main_top_html
-        )
+        body.append(_tabs_open(len(ch["recommendations"]), bool(plan_html)) + main_top_html)
     if web and ch:
         pc, pt = (compare or {}).get("channel") or {}, (compare or {}).get("totals") or {}
         have = bool((compare or {}).get("available"))
@@ -656,10 +692,151 @@ def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
             body.append(f"<div class='card'><h2>{label}</h2>{_chips(cn[key])}</div>")
     if tabs:
         body.append("</section>")
+        body.append(plan_html)
         body.append(_tips_panel(ch))
         body.append(TABS_SCRIPT)
     body.append("<p class='muted'>telegram-analiz yordamida yaratildi.</p>")
     return _page(title, body)
+
+
+def _tabs_open(n_tips: int, with_plan: bool) -> str:
+    def tab(key: str, label: str, selected: bool = False) -> str:
+        return (f"<button type='button' role='tab' id='tab-{key}' aria-controls='p-{key}' "
+                f"aria-selected='{'true' if selected else 'false'}'>{label}</button>")
+
+    return (
+        "<div class='tabs' role='tablist' aria-label='Bo‘limlar'>"
+        + tab("main", "Asosiy", True)
+        + (tab("plan", "Plan") if with_plan else "")
+        + tab("tips", f"Tavsiyalar<span class='badge'>{n_tips}</span>")
+        + "</div><section id='p-main' role='tabpanel' aria-labelledby='tab-main'>"
+    )
+
+
+def render_plan_panel(ctx: dict[str, Any]) -> str:
+    """"Plan" bo'limi. Planlar /api/plan dan brauzerda olinadi (CDN keshidan qat'i nazar doim yangi),
+    faktlar sahifaga ``ctx["actuals"]`` sifatida joylanadi."""
+    esc = html.escape
+    data = json.dumps(ctx, ensure_ascii=False).replace("</", "<\\/")
+    elapsed, total = ctx["days_elapsed"], ctx["days_total"]
+    pct = round(100 * elapsed / total) if total else 0
+    nav = ""
+    if ctx.get("prev_href") or ctx.get("next_href"):
+        nav = ("<nav class='plan-nav'>"
+               + (f"<a href='{esc(ctx['prev_href'])}'>← {esc(ctx.get('prev_label', ''))}</a>" if ctx.get("prev_href") else "")
+               + (f"<a href='{esc(ctx['next_href'])}'>{esc(ctx.get('next_label', ''))} →</a>" if ctx.get("next_href") else "")
+               + "</nav>")
+    return (
+        "<section id='p-plan' role='tabpanel' aria-labelledby='tab-plan' hidden>"
+        f"<div class='plan-head'><div><h2 class='plan-title'>Plan · {esc(ctx['month_label'])}</h2>"
+        f"<p class='muted plan-sub'>{elapsed} / {total} kun o'tdi ({pct}%)</p></div>{nav}</div>"
+        "<div id='plan-cards' class='plan-grid'><div class='card'><p class='muted'>Yuklanmoqda…</p></div></div>"
+        "<details class='card plan-edit' id='plan-edit'><summary>Planni tahrirlash</summary>"
+        "<form id='plan-form' novalidate>"
+        "<div class='plan-rows-head'><span>Ko'rsatkich</span><span>Plan</span><span>Fakt</span><span></span></div>"
+        "<div id='plan-rows'></div>"
+        "<div class='plan-actions'>"
+        "<button type='button' id='plan-add' class='btn-ghost'>+ Ko'rsatkich qo'shish</button>"
+        "<input type='password' id='plan-pass' placeholder='Parol' autocomplete='current-password' hidden>"
+        "<button type='submit' id='plan-save'>Saqlash</button>"
+        "<span id='plan-msg' class='muted' role='status'></span></div>"
+        "<p class='muted note'>Obunachilar, postlar va ko'rishlar fakti avtomatik hisoblanadi. "
+        "\"Boshqa\" ko'rsatkichlar (masalan, sifatli lidlar) faktini o'zingiz kiritasiz.</p>"
+        "</form></details>"
+        f"<script type='application/json' id='plan-ctx'>{data}</script>"
+        + PLAN_SCRIPT + "</section>"
+    )
+
+
+PLAN_SCRIPT = r"""<script>(function(){
+var ctx=JSON.parse(document.getElementById('plan-ctx').textContent),M=ctx.metrics,A=ctx.actuals;
+var cards=document.getElementById('plan-cards'),rows=document.getElementById('plan-rows'),
+    form=document.getElementById('plan-form'),msg=document.getElementById('plan-msg'),
+    pass=document.getElementById('plan-pass'),edit=document.getElementById('plan-edit');
+var state={items:[],protected:false,storage:true};
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function fmt(n){if(n==null||isNaN(n))return '—';var r=Math.round(n);return (r<0?'−':'')+String(Math.abs(r)).replace(/\B(?=(\d{3})+(?!\d))/g,' ');}
+function signed(n){return n==null?'—':(n>0?'+':'')+fmt(n);}
+function name(it){return it.metric==='custom'?it.name:(M[it.metric]||{}).label||it.metric;}
+function actual(it){return it.metric==='custom'?it.actual:A[it.metric];}
+function evaluate(it){
+  var m=M[it.metric]||{kind:'sum',dir:'up'},plan=+it.plan,act=actual(it),T=ctx.days_total,E=ctx.days_elapsed;
+  var done=E>=T,frac=T?E/T:0,r={act:act,plan:plan,lines:[]};
+  if(act==null){r.status='nodata';r.label=m.source==='admin'?"Obunachilar statistikasi yo'q":"Fakt kiritilmagan";return r;}
+  r.pct=plan>0?act/plan*100:null;r.diff=act-plan;
+  if(m.kind==='sum'){
+    r.marker=done?null:frac*100;var expected=plan*frac,left=T-E;
+    if(E===0){r.status='wait';r.label='Boshlanmagan';}
+    else if(m.dir==='down'){var lim=done?plan:expected;r.status=act<=lim?'ok':'behind';r.label=act<=lim?"Me'yorda":'Oshib ketdi';}
+    else if(done){r.status=act>=plan?'done':'missed';r.label=act>=plan?'Bajarildi':'Bajarilmadi';}
+    else{var q=expected?act/expected:1;r.status=q>=1.05?'ahead':q>=0.95?'ok':'behind';
+      r.label=q>=1.05?'Oldinda':q>=0.95?'Rejada':'Orqada';}
+    if(!done&&E>0){r.lines.push(['Bugungacha kerak',fmt(expected)]);
+      r.lines.push(['Oy oxiri prognozi',fmt(act/E*T)]);
+      if(m.dir!=='down'&&left>0&&act<plan)r.lines.push(['Kuniga kerak (qolgan '+left+' kun)',fmt((plan-act)/left)]);}
+  }else{
+    var ok=m.dir==='down'?act<=plan:act>=plan;r.status=ok?'done':'behind';
+    r.label=ok?'Plan darajasida':'Plandan past';
+  }
+  return r;
+}
+function renderCards(){
+  if(!state.items.length){cards.innerHTML="<div class='card plan-empty'><h2>Bu oy uchun plan kiritilmagan</h2>"+
+    "<p class='muted'>Pastdagi \"Planni tahrirlash\" bo'limida maqsadlarni yozing va saqlang — fakt bilan farq shu yerda chiqadi.</p></div>";return;}
+  cards.innerHTML=state.items.map(function(it){var r=evaluate(it),w=r.pct==null?0:Math.min(100,Math.max(0,r.pct));
+    var bad=r.status==='behind'||r.status==='missed',good=r.status==='ahead'||r.status==='ok'||r.status==='done';
+    return "<div class='card pcard'><div class='pk'>"+esc(name(it))+"</div>"+
+      "<div class='pv'><b>"+fmt(r.act)+"</b> <span class='muted'>/ "+fmt(r.plan)+"</span>"+
+      (r.pct!=null?"<span class='ppct'>"+Math.round(r.pct)+"%</span>":"")+"</div>"+
+      "<div class='pbar"+(bad?' bad':good?' good':'')+"'><i style='width:"+w+"%'></i>"+
+      (r.marker!=null?"<s style='left:"+r.marker+"%' title='Bugungacha kerak'></s>":"")+"</div>"+
+      "<div class='pmeta'><span class='pstat "+r.status+"'>"+esc(r.label)+"</span>"+
+      (r.diff!=null?"<span>Farq: <b>"+signed(r.diff)+"</b></span>":"")+"</div>"+
+      (r.lines.length?"<dl class='plines'>"+r.lines.map(function(l){return "<dt>"+esc(l[0])+"</dt><dd>"+l[1]+"</dd>";}).join('')+"</dl>":"")+
+      "</div>";}).join('');
+}
+function rowHtml(it){
+  var opts=Object.keys(M).map(function(k){return "<option value='"+k+"'"+(it.metric===k?' selected':'')+">"+esc(M[k].label)+"</option>";}).join('');
+  var custom=it.metric==='custom';
+  return "<div class='plan-row'><div class='pr-metric'><select class='pr-sel' aria-label=\"Ko'rsatkich\">"+opts+"</select>"+
+    "<input class='pr-name' type='text' maxlength='60' placeholder='Nomi (masalan, Sifatli lidlar)' value='"+esc(it.name||'')+"'"+(custom?'':' hidden')+"></div>"+
+    "<input class='pr-plan' type='number' min='0' step='any' inputmode='decimal' placeholder='Plan' aria-label='Plan' value='"+(it.plan==null?'':it.plan)+"'>"+
+    "<input class='pr-act' type='number' min='0' step='any' inputmode='decimal' placeholder='Fakt' aria-label='Fakt' value='"+(it.actual==null?'':it.actual)+"'"+(custom?'':' hidden')+">"+
+    (custom?"":"<span class='pr-auto muted'>avto: "+fmt(A[it.metric])+"</span>")+
+    "<button type='button' class='pr-del' aria-label=\"O'chirish\">×</button></div>";
+}
+function renderRows(items){rows.innerHTML=items.map(rowHtml).join('');}
+function readRows(){return Array.prototype.map.call(rows.querySelectorAll('.plan-row'),function(r){
+  var metric=r.querySelector('.pr-sel').value,it={metric:metric,plan:r.querySelector('.pr-plan').value};
+  if(metric==='custom'){it.name=r.querySelector('.pr-name').value.trim();it.actual=r.querySelector('.pr-act').value;}
+  return it;});}
+rows.addEventListener('change',function(e){if(e.target.classList.contains('pr-sel')){var items=readRows();renderRows(items);}});
+rows.addEventListener('click',function(e){if(e.target.classList.contains('pr-del')){e.target.closest('.plan-row').remove();}});
+document.getElementById('plan-add').addEventListener('click',function(){var items=readRows();items.push({metric:'joined',plan:null});renderRows(items);});
+function getPass(){try{return localStorage.getItem('tg-plan-pass')||'';}catch(e){return '';}}
+form.addEventListener('submit',function(e){e.preventDefault();
+  var items=readRows().filter(function(it){return it.plan!==''||(it.name||'');});
+  var btn=document.getElementById('plan-save');btn.disabled=true;msg.textContent='Saqlanmoqda…';
+  fetch('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({channel:ctx.channel,month:ctx.month,items:items,password:pass.value||getPass()})})
+  .then(function(r){return r.json().then(function(d){return [r.status,d];});})
+  .then(function(x){var st=x[0],d=x[1];btn.disabled=false;
+    if(st===200){state.items=d.items;renderCards();renderRows(state.items.length?state.items:ctx.suggested);
+      if(pass.value){try{localStorage.setItem('tg-plan-pass',pass.value);}catch(e){}}
+      msg.textContent='Saqlandi ✓ '+new Date().toLocaleTimeString('uz',{hour:'2-digit',minute:'2-digit'});}
+    else{if(d.protected){pass.hidden=false;}msg.textContent=d.error||'Xato';}})
+  .catch(function(){btn.disabled=false;msg.textContent="Saqlab bo'lmadi: internet aloqasini tekshiring.";});});
+fetch('/api/plan?month='+encodeURIComponent(ctx.month)+'&channel='+encodeURIComponent(ctx.channel),{cache:'no-store'})
+  .then(function(r){return r.json();})
+  .then(function(d){state.items=d.items||[];state.protected=!!d.protected;state.storage=d.storage!==false;
+    pass.hidden=!(state.protected&&!getPass());
+    renderCards();renderRows(state.items.length?state.items:ctx.suggested);
+    if(!state.items.length)edit.open=true;
+    if(d.error){msg.textContent=d.error;}
+    if(!state.storage){document.getElementById('plan-save').disabled=true;}})
+  .catch(function(){cards.innerHTML="<div class='card'><p class='muted'>Planni yuklab bo'lmadi. Sahifani yangilang.</p></div>";
+    renderRows(ctx.suggested);edit.open=true;});
+})();</script>"""
 
 
 def _tips_panel(ch: dict[str, Any]) -> str:
@@ -697,25 +874,28 @@ def _tips_panel(ch: dict[str, Any]) -> str:
 
 
 TABS_SCRIPT = """<script>(function(){
-var tabs={main:document.getElementById('tab-main'),tips:document.getElementById('tab-tips')},
-    panels={main:document.getElementById('p-main'),tips:document.getElementById('p-tips')};
-if(!tabs.main||!tabs.tips)return;
+var names=['main','plan','tips'],hashes={main:'',plan:'#plan',tips:'#tavsiyalar'},tabs={},panels={};
+names.forEach(function(k){var t=document.getElementById('tab-'+k),p=document.getElementById('p-'+k);
+  if(t&&p){tabs[k]=t;panels[k]=p;}});
+var keys=Object.keys(tabs);if(keys.length<2)return;
 function withHash(href,hash){var u=new URL(href,location.href);u.hash=hash;return u.pathname+u.search+u.hash;}
 function show(name,save){
-  ['main','tips'].forEach(function(k){var on=k===name;tabs[k].setAttribute('aria-selected',on);
+  if(!tabs[name])name='main';
+  keys.forEach(function(k){var on=k===name;tabs[k].setAttribute('aria-selected',on);
     tabs[k].tabIndex=on?0:-1;panels[k].hidden=!on;});
-  var hash=name==='tips'?'#tavsiyalar':'';
+  var hash=hashes[name];
   if(save)history.replaceState(null,'',location.pathname+location.search+hash);
-  // Filtr, oy va "Yangilash" havolalari tanlangan bo'limni saqlab qoladi.
-  document.querySelectorAll('.pills a.pill,#tb-refresh').forEach(function(a){a.href=withHash(a.href,hash);});
+  // Filtr, oy, "Yangilash" va plan oyi havolalari tanlangan bo'limni saqlab qoladi.
+  document.querySelectorAll('.pills a.pill,#tb-refresh,.plan-nav a').forEach(function(a){a.href=withHash(a.href,hash);});
   var f=document.getElementById('tb-form');if(f)f.action=withHash(f.getAttribute('action').split('#')[0],hash);
 }
-tabs.main.addEventListener('click',function(){show('main',true);});
-tabs.tips.addEventListener('click',function(){show('tips',true);});
+keys.forEach(function(k){tabs[k].addEventListener('click',function(){show(k,true);});});
 document.querySelector('.tabs').addEventListener('keydown',function(e){
-  if(e.key==='ArrowRight'||e.key==='ArrowLeft'){var n=tabs.main.getAttribute('aria-selected')==='true'?'tips':'main';
-    show(n,true);tabs[n].focus();}});
-show(location.hash==='#tavsiyalar'?'tips':'main',false);
+  if(e.key!=='ArrowRight'&&e.key!=='ArrowLeft')return;
+  var cur=keys.findIndex(function(k){return tabs[k].getAttribute('aria-selected')==='true';});
+  var n=keys[(cur+(e.key==='ArrowRight'?1:keys.length-1))%keys.length];show(n,true);tabs[n].focus();});
+var start=Object.keys(hashes).find(function(k){return hashes[k]&&hashes[k]===location.hash;});
+show(start||'main',false);
 })();</script>"""
 
 

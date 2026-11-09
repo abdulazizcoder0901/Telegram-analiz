@@ -103,6 +103,27 @@ python -m telegram_analiz.make_session
 `TG_SESSION` akkauntingizga kirish kalitidir: hech kimga bermang. Bekor qilish: Telegram →
 Sozlamalar → Qurilmalar → "Junior Telegram dashboard" → Tugatish.
 
+### Oy boshidagi son o'zgarmaydi
+
+Telegram eski kunlardagi jami obunachilar sonini keyinroq tuzatib turadi (masalan, o'chirilgan
+akkauntlar). Shuning uchun har oyning boshidagi son birinchi hisoblanganda bazaga
+(`tg:<kanal>:month_start:<YYYY-MM>`) bir marta yoziladi va keyin o'zgarmaydi; sof o'zgarish
+"oy oxiri − qotirilgan oy boshi" bo'yicha hisoblanadi. Qiymatni qayta hisoblatish kerak bo'lsa,
+Upstash konsolida shu kalitni o'chiring.
+
+## Plan bo'limi (sayt)
+
+"Asosiy" va "Tavsiyalar" orasidagi **Plan** bo'limida har oy uchun maqsadlar kiritiladi va fakt bilan
+solishtiriladi: fakt / plan, bajarilish foizi, bugungacha qayerda bo'lish kerakligi, holat
+(Oldinda / Rejada / Orqada), farq, kuniga qancha kerak va oy oxiri prognozi.
+
+* Avtomatik fakt: qo'shilgan / chiqib ketgan obunachilar, sof o'sish, oy oxiridagi obunachilar
+  (admin statistikasi), postlar soni, ko'rishlar, o'rtacha ko'rish, reaksiyalar.
+* Qo'lda: "Boshqa" ko'rsatkichlar (masalan, **Sifatli lidlar**) — plan va faktni o'zingiz yozasiz.
+* Planlar Upstash bazasida saqlanadi (`/api/plan`), shuning uchun baza ulangan bo'lishi kerak.
+* Sayt ochiq bo'lgani uchun Vercel'ga `PLAN_PASSWORD` qo'yishni tavsiya qilamiz: shunda planni faqat
+  parolni bilgan kishi o'zgartiradi (ko'rish hammaga ochiq qoladi).
+
 ## Obunachilar: qo'shilgan, chiqib ketgan, oy boshi/oxiri (admin uchun, buyruq qatori)
 
 Bu ma'lumot ochiq sahifada yo'q — faqat kanal adminlariga Telegram statistikasida ko'rinadi.

@@ -24,10 +24,11 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from telegram_analiz import admin_stats, history  # noqa: E402
+from telegram_analiz import admin_stats, history, plan  # noqa: E402
 from telegram_analiz.analyzer import analyze  # noqa: E402
 from telegram_analiz.filters import (  # noqa: E402
     MONTHS_FULL,
+    month_bounds,
     coverage_warning,
     filter_range,
     format_range,
@@ -35,7 +36,14 @@ from telegram_analiz.filters import (  # noqa: E402
     type_options,
 )
 from telegram_analiz.loader import ExportError  # noqa: E402
-from telegram_analiz.report import CSS, render_followers_block, render_toolbar, to_html, to_json  # noqa: E402
+from telegram_analiz.report import (  # noqa: E402
+    CSS,
+    render_followers_block,
+    render_plan_panel,
+    render_toolbar,
+    to_html,
+    to_json,
+)
 from telegram_analiz.scraper import _build_chat, fetch_page, normalize_channel, parse_page, parse_tz  # noqa: E402
 
 DEFAULT_CHANNEL = "junior_academy"  # sayt ochilganda shu kanal ko'rsatiladi
@@ -102,7 +110,65 @@ def admin_data(channel: str, min_fetched: float) -> dict | None:
     return entry
 
 
-def followers_section(entry: dict | None, start: date | None, end: date | None, tz) -> tuple[str, dict | None]:
+# (kanal, "YYYY-MM") → {"total": oy boshidagi son, "recorded": qayd etilgan sana}
+_FROZEN: dict[tuple[str, str], dict] = {}
+
+
+def frozen_month_start(channel: str, year: int, month: int, series: dict, today: date) -> dict | None:
+    """Oy boshidagi obunachilar soni: birinchi marta hisoblanganda bazaga yoziladi va keyin o'zgarmaydi.
+
+    Telegram eski kunlardagi jami sonni keyinroq tuzatib turadi, shuning uchun har safar qayta
+    hisoblansa "oy boshida" har kuni boshqacha chiqadi.
+    """
+    mk = plan.month_key(year, month)
+    cache_key = (channel, mk)
+    if cache_key in _FROZEN:
+        return _FROZEN[cache_key]
+    if (year, month) > (today.year, today.month) or not series:
+        return None
+    base = history.store_from_env()
+    store = history.JSONStore(base) if base else None
+    db_key = f"tg:{channel}:month_start:{mk}"
+    if store:
+        try:
+            saved = store.get(db_key)
+            if saved and saved.get("total") is not None:
+                _FROZEN[cache_key] = saved
+                return saved
+        except Exception as exc:  # noqa: BLE001
+            print(f"[frozen] o'qib bo'lmadi: {exc}", flush=True)
+    try:
+        computed = admin_stats.month_summary(series, *month_bounds(year, month))["start_total"]
+    except ExportError:
+        return None
+    if computed is None:
+        return None
+    value = {"total": computed, "recorded": today.isoformat()}
+    if not store:
+        return None  # bazasiz qotirib bo'lmaydi — Telegram'ning joriy hisobi ishlatiladi
+    try:
+        if not store.set_once(db_key, value):
+            value = store.get(db_key) or value  # boshqa so'rov oldinroq yozib ulgurgan
+        print(f"[frozen] {channel} {mk}: oy boshida {value['total']}", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[frozen] yozib bo'lmadi: {exc}", flush=True)
+        return None
+    _FROZEN[cache_key] = value
+    return value
+
+
+def with_frozen_start(summary: dict | None, channel: str, start: date | None, series: dict, today: date) -> dict | None:
+    """Davr oyning 1-kunidan boshlansa, "oy boshida" qotirilgan qiymat bilan almashtiriladi."""
+    if summary is None or start is None or start.day != 1:
+        return summary
+    frozen = frozen_month_start(channel, start.year, start.month, series, today)
+    if not frozen:
+        return summary
+    return admin_stats.apply_start(summary, frozen["total"], frozen.get("recorded"))
+
+
+def followers_section(entry: dict | None, start: date | None, end: date | None, tz,
+                      channel: str = DEFAULT_CHANNEL, today: date | None = None) -> tuple[str, dict | None]:
     if entry is None:
         return render_followers_block(summary=None, raw=None, configured=False), None
     series = entry["series"]
@@ -114,6 +180,7 @@ def followers_section(entry: dict | None, start: date | None, end: date | None, 
             summary = admin_stats.month_summary(series, s, e)
         except ExportError as exc:
             error = str(exc)
+        summary = with_frozen_start(summary, channel, s, series, today or date.today())
     sources = admin_stats.source_totals(entry["raw"] or {}, "new_followers_by_source_graph", start, end)
     fetched = f"olingan {_clock(entry['fetched'], tz)}" + (" · tarix saqlanmoqda" if entry.get("stored") else "")
     block = render_followers_block(summary=summary, raw=entry["raw"], sources=sources, error=error,
@@ -214,7 +281,14 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str, dict[str, str]]:
     )
     start, end = filters.bounds(today)
     comp = filters.comparison(today)
-    since = min(d for d in (start, comp[0] if comp else None) if d) if start else None
+    # Plan oyi: tanlangan oy, aks holda davr tugagan (yoki joriy) oy.
+    if filters.month:
+        plan_y, plan_m = filters.month
+    else:
+        ref = end or today
+        plan_y, plan_m = ref.year, ref.month
+    plan_start, plan_end = month_bounds(plan_y, plan_m)
+    since = min(d for d in (start, comp[0] if comp else None, plan_start) if d) if start else None
 
     now = time.time()
     refresh = bool(q("refresh"))
@@ -268,7 +342,29 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str, dict[str, str]]:
     # CDN sahifani faqat joriy 20 daqiqalik oraliq oxirigacha saqlaydi.
     cache_headers = {"Cache-Control": f"public, max-age=0, s-maxage={max(1, int(next_update - now))}"}
     result["data"] = {"fetched_at": int(fetched), "next_update": int(next_update)}
-    followers_html, followers = followers_section(admin_entry, start, end, tz)
+    followers_html, followers = followers_section(admin_entry, start, end, tz, channel, today)
+
+    # Plan bo'limi uchun shu oyning avtomatik faktlari.
+    plan_posts = analyze(filter_range(chat, plan_start, plan_end), top_n=1)
+    plan_followers = None
+    if admin_entry and admin_entry.get("series"):
+        try:
+            plan_followers = with_frozen_start(
+                admin_stats.month_summary(admin_entry["series"], plan_start, plan_end),
+                channel, plan_start, admin_entry["series"], today)
+        except ExportError:
+            plan_followers = None
+    plan_ctx = {
+        "channel": channel,
+        "month": plan.month_key(plan_y, plan_m),
+        "month_label": f"{plan_y} {MONTHS_FULL[plan_m]}",
+        **plan.month_progress(plan_y, plan_m, today),
+        "actuals": plan.actuals_for_month(plan_posts, plan_followers),
+        "admin": admin_entry is not None,
+        "metrics": plan.METRICS,
+        "suggested": plan.SUGGESTED,
+    }
+    result["plan_context"] = {k: plan_ctx[k] for k in ("month", "days_total", "days_elapsed", "actuals")}
     if followers is not None:
         result["followers"] = followers
     if q("format") == "json":
@@ -298,6 +394,13 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str, dict[str, str]]:
         base["channel"] = channel
     if version:
         base["v"] = str(int(version))
+    def month_href(y: int, m: int) -> str:
+        return f"{ACTION}?{urlencode(base | {'month': plan.month_key(y, m)})}#plan"
+
+    py, pm = (plan_y - 1, 12) if plan_m == 1 else (plan_y, plan_m - 1)
+    ny, nm = (plan_y + 1, 1) if plan_m == 12 else (plan_y, plan_m + 1)
+    plan_ctx.update(prev_href=month_href(py, pm), prev_label=MONTHS_FULL[pm],
+                    next_href=month_href(ny, nm), next_label=MONTHS_FULL[nm])
     current = dict(base)
     if filters.types:
         current["type"] = filters.types[0]
@@ -322,7 +425,7 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str, dict[str, str]]:
         next_ts=int(next_update),
     )
     page = to_html(result, top_html=toolbar, show_header=False, compare=compare, web=True,
-                   main_top_html=followers_html)
+                   main_top_html=followers_html, plan_html=render_plan_panel(plan_ctx))
     return 200, "text/html; charset=utf-8", page, cache_headers
 
 

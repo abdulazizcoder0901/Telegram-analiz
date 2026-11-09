@@ -62,6 +62,24 @@ class HistoryStore:
         return len(args) // 2
 
 
+class JSONStore:
+    """HistoryStore ustida oddiy JSON kalit/qiymat (planlar uchun)."""
+
+    def __init__(self, store: HistoryStore):
+        self.store = store
+
+    def get(self, key: str) -> Any:
+        value = self.store._command("GET", key)
+        return json.loads(value) if value else None
+
+    def set(self, key: str, value: Any) -> None:
+        self.store._command("SET", key, json.dumps(value, ensure_ascii=False))
+
+    def set_once(self, key: str, value: Any) -> bool:
+        """Kalit bo'sh bo'lsagina yozadi (SET NX). Yozilgan bo'lsa True."""
+        return self.store._command("SET", key, json.dumps(value, ensure_ascii=False), "NX") == "OK"
+
+
 def store_from_env(env: dict[str, str] | None = None) -> HistoryStore | None:
     """KV_REST_API_URL/TOKEN, UPSTASH_REDIS_REST_URL/TOKEN yoki istalgan prefiksli
     <PREFIKS>_REST_API_URL/<PREFIKS>_REST_API_TOKEN juftligini topadi."""

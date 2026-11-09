@@ -282,6 +282,22 @@ def month_summary(series: dict[date, dict[str, Any]], start: date, end: date) ->
     }
 
 
+def apply_start(summary: dict[str, Any], start_total: float | None, recorded_on: str | None = None) -> dict[str, Any]:
+    """Oy boshidagi sonni qotirilgan qiymat bilan almashtirib, unga bog'liq ko'rsatkichlarni qayta hisoblaydi."""
+    if start_total is None:
+        return summary
+    s = dict(summary)
+    end_total, joined, left = s.get("end_total"), s.get("joined") or 0, s.get("left") or 0
+    s["start_total"] = start_total
+    s["start_estimated"] = False
+    s["start_frozen_on"] = recorded_on
+    s["total_change"] = (end_total - start_total) if end_total is not None else None
+    s["mismatch"] = (end_total - (start_total + joined - left)) if end_total is not None else None
+    s["churn_pct"] = round(100 * left / start_total, 2) if start_total else None
+    s["growth_pct"] = round(100 * (end_total - start_total) / start_total, 2) if start_total and end_total is not None else None
+    return s
+
+
 # ---------------------------------------------------------------- hisobot
 
 def _svg_diverging(labels: list[str], up: list[float], down: list[float], height: int = 220) -> str:
