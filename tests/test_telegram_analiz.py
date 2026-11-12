@@ -637,7 +637,8 @@ class ManualMonthStartTests(unittest.TestCase):
             self.assertEqual(f["total_change"], f["end_total"] - 5000)
             _, _, body, _ = mod.run({"month": ["2026-10"]})
             self.assertIn("1-okt holati · qo'lda", body.split("class='followers'")[1][:3000])
-            self.assertIn("id='ms-form'", body)
+            self.assertNotIn("ms-form", body)  # sahifada tuzatish formasi/tugmasi yo'q
+            self.assertNotIn("Tuzatish", body)
             # avtomatikka qaytarish: kalit o'chadi, son qayta hisoblanadi va yana qotiriladi
             self.assertEqual(plan_mod.save_plan(json.dumps({"action": "month_start", "month": "2026-10", "total": ""}).encode())[0], 200)
             f = json.loads(mod.run({"month": ["2026-10"], "format": ["json"]})[2])["followers"]

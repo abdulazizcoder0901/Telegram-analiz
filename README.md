@@ -111,10 +111,8 @@ akkauntlar). Shuning uchun har oyning boshidagi son birinchi hisoblanganda bazag
 "oy oxiri − qotirilgan oy boshi" bo'yicha hisoblanadi.
 
 "Oy boshida" kartochkasi har doim ko'rinadi (sayt standart holatda **Shu oy** bilan ochiladi; boshqa davr
-tanlansa, yonida alohida "Davr boshida" chiqadi). Kartochkadagi **✎ Tuzatish** orqali sonni qo'lda kiritish
-mumkin (Telegram'ning hozirgi hisobi taklif sifatida ko'rsatiladi); **Avtomatikka qaytarish** qo'lda
-kiritilganni o'chirib, sonni qayta hisoblatadi. `PLAN_PASSWORD` qo'yilgan bo'lsa, parol so'raladi.
-
+tanlansa, yonida alohida "Davr boshida" chiqadi). Kerak bo'lsa sonni `/api/plan` orqali (`{"action": "month_start", "month": "2026-11", "total": N}`)
+qo'lda tuzatish mumkin; bo'sh `total` avtomatik hisobga qaytaradi.
 ### Yangi va eski auditoriya
 
 "Qo'shildi" va "Chiqib ketdi" kartochkalari bosilsa, tafsilot alohida oynada (modal) ochiladi:

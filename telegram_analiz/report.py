@@ -285,14 +285,6 @@ border:1px solid var(--line);border-radius:14px;background:var(--card);color:var
 .aud-bar i{position:absolute;inset:0 auto 0 0;border-radius:999px}.aud-bar.up i{background:var(--good)}.aud-bar.down i{background:var(--bad)}
 .aud-extra{margin:10px 0 0;font-size:14px}.aud-extra b{font-family:var(--font-num)}
 @media (max-width:560px){.aud-row{grid-template-columns:minmax(0,1fr) auto 56px}.aud-bar{grid-column:1/-1}}
-.ms-edit,.linkish{background:none;border:0;padding:0;margin-top:6px;font:500 13px var(--font-body);color:var(--accent);cursor:pointer}
-.ms-edit:hover,.linkish:hover{text-decoration:underline}
-.ms-edit:focus-visible,.linkish:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.ms-form{display:grid;gap:8px;margin:0 0 12px}.ms-form label{font-weight:600}
-.ms-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.ms-row input{font:500 15px var(--font-num);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);width:160px;max-width:100%}
-#ms-save{font:600 14px var(--font-body);padding:9px 18px;border:0;border-radius:8px;background:var(--accent);color:var(--on-accent);cursor:pointer}
-.ms-row input:focus-visible,#ms-save:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .plan-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:18px 0 6px}
 .plan-title{font-size:20px;margin:0}.plan-sub{margin:4px 0 0;font-size:14px}
 .plan-nav{display:flex;gap:16px;font-size:14px}
@@ -487,8 +479,6 @@ def render_followers_block(
         d = date_of(ms.get("date") or start)
         ms_sub = (f"<div class='d'>{d.day}-{_MONTHS_SHORT[d.month]} holati"
                   + (" · qo'lda" if ms.get("manual") else "") + "</div>")
-        if ms.get("total") is not None or ms.get("telegram") is not None:
-            ms_sub += "<button type='button' class='ms-edit' aria-controls='ms-form'>✎ Tuzatish</button>"
     tiles = [
         ("Obunachilar", num((raw.get("followers") or {}).get("current") or summary["end_total"]),
          "", tg_delta(raw.get("followers"))),
@@ -526,8 +516,6 @@ def render_followers_block(
     parts = [head, "<div class='grid'>" + "".join(tile_html(*t) for t in tiles) + "</div>"]
     if aud:
         parts.append(_audience_panels(aud, summary))
-    if ms:
-        parts.append(_month_start_form(ms))
 
     days = summary["days"]
     labels = [d["date"][8:10] + "." + d["date"][5:7] for d in days]
@@ -632,56 +620,6 @@ document.querySelectorAll('.aud-modal').forEach(function(d){
 
 
 _MONTHS_SHORT = ["", "yan", "fev", "mar", "apr", "may", "iyun", "iyul", "avg", "sen", "okt", "noy", "dek"]
-
-
-def _month_start_form(ms: dict[str, Any]) -> str:
-    """"Oy boshida" sonini qo'lda tuzatish formasi (/api/plan, action=month_start)."""
-    esc = html.escape
-    d = date_of(ms["date"])
-    tg = ms.get("telegram")
-    hint = ""
-    if tg is not None:
-        prev = d.fromordinal(d.toordinal() - 1)
-        hint = (f"<p class='muted note'>Telegram'ning hozirgi hisobi: <b>{_n(int(tg))}</b> "
-                f"({prev.day}-{_MONTHS_SHORT[prev.month]} oxiri). "
-                f"<button type='button' class='linkish' data-fill='{int(tg)}'>Shuni qo'yish</button></p>")
-    payload = json.dumps({"channel": ms.get("channel"), "month": ms["month"]}).replace("</", "<\\/")
-    return (
-        f"<form id='ms-form' class='card ms-form' hidden data-ms='{esc(payload)}'>"
-        f"<label for='ms-total'>Oy boshidagi obunachilar ({d.day}-{_MONTHS_SHORT[d.month]} holati)</label>"
-        "<div class='ms-row'>"
-        f"<input id='ms-total' type='number' min='0' step='1' inputmode='numeric' value='{'' if ms.get('total') is None else int(ms['total'])}'>"
-        "<input id='ms-pass' type='password' placeholder='Parol' autocomplete='current-password' hidden>"
-        "<button type='submit' id='ms-save'>Saqlash</button>"
-        "<button type='button' id='ms-auto' class='btn-ghost'>Avtomatikka qaytarish</button>"
-        "<span id='ms-msg' class='muted' role='status'></span></div>"
-        f"{hint}</form>" + MONTH_START_SCRIPT
-    )
-
-
-MONTH_START_SCRIPT = r"""<script>(function(){
-var f=document.getElementById('ms-form');if(!f)return;
-var meta=JSON.parse(f.dataset.ms),input=f.querySelector('#ms-total'),pass=f.querySelector('#ms-pass'),
-    msg=f.querySelector('#ms-msg');
-document.querySelectorAll('.ms-edit').forEach(function(b){b.addEventListener('click',function(){
-  f.hidden=!f.hidden;if(!f.hidden)input.focus();});});
-f.querySelectorAll('[data-fill]').forEach(function(b){b.addEventListener('click',function(){input.value=b.dataset.fill;input.focus();});});
-function getPass(){try{return localStorage.getItem('tg-plan-pass')||'';}catch(e){return '';}}
-function send(total){
-  msg.textContent='Saqlanmoqda…';
-  fetch('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({action:'month_start',channel:meta.channel,month:meta.month,total:total,password:pass.value||getPass()})})
-  .then(function(r){return r.json().then(function(d){return [r.status,d];});})
-  .then(function(x){var st=x[0],d=x[1];
-    if(st===200){if(pass.value){try{localStorage.setItem('tg-plan-pass',pass.value);}catch(e){}}
-      msg.textContent='Saqlandi ✓';var u=new URL(location.href);u.searchParams.set('v',Math.floor(Date.now()/1000));
-      location.replace(u.toString());}
-    else{if(d.protected){pass.hidden=false;pass.focus();}msg.textContent=d.error||'Xato';}})
-  .catch(function(){msg.textContent="Saqlab bo'lmadi: internet aloqasini tekshiring.";});
-}
-f.addEventListener('submit',function(e){e.preventDefault();if(input.value==='')return;send(input.value);});
-f.querySelector('#ms-auto').addEventListener('click',function(){send('');});
-})();</script>"""
 
 
 def date_of(value: str):
