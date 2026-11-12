@@ -117,7 +117,7 @@ kiritilganni o'chirib, sonni qayta hisoblatadi. `PLAN_PASSWORD` qo'yilgan bo'lsa
 
 ### Yangi va eski auditoriya
 
-"Qo'shildi" va "Chiqib ketdi" kartochkalari bosilsa, tafsilot ochiladi:
+"Qo'shildi" va "Chiqib ketdi" kartochkalari bosilsa, tafsilot alohida oynada (modal) ochiladi:
 
 * **Qo'shilganlar:** birinchi marta qo'shilganlar / qaytganlar (oldin chiqib ketgan), va ulardan
   keyin chiqib ketganlar soni va foizi.

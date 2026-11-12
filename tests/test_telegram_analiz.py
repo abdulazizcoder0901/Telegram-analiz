@@ -760,7 +760,8 @@ class AudiencePanelTests(unittest.TestCase):
         block = body.split("class='followers'")[1]
         self.assertIn("aria-controls='aud-joined'", block)
         self.assertIn("aria-controls='aud-left'", block)
-        self.assertIn("id='aud-left' class='card aud' hidden", block)
+        self.assertIn("<dialog id='aud-left' class='aud-modal'", block)  # modal oyna, sahifa ichida emas
+        self.assertIn("aria-haspopup='dialog'", block)
         self.assertIn("Shu davrda qo&#x27;shilganlar (yangi auditoriya)", block)
         self.assertNotIn("a1", json.dumps(js["followers"]))  # xesh ham sahifaga chiqmaydi
         self.assertIn("[hidden]{display:none!important}", body)  # yashirin forma/panellar ko'rinmasin

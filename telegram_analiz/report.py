@@ -268,10 +268,16 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 details.card summary{cursor:pointer;font-weight:600}details.card[open] summary{margin-bottom:10px}
 .setup{border-style:dashed}
 .kpi-btn{font:inherit;color:inherit;text-align:left;cursor:pointer;width:100%;display:block}
-.kpi-btn:hover{border-color:var(--accent)}.kpi-btn[aria-expanded=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.kpi-btn:hover{border-color:var(--accent)}
 .kpi-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .kpi-more{font-size:12px;color:var(--accent);margin-top:6px}
-.aud{margin:0 0 12px}.aud h2 .muted{font-weight:500;font-size:13px;margin-left:6px}
+.aud-modal{width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto;padding:20px 22px;
+border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--fg);box-shadow:0 24px 60px -20px rgba(0,0,0,.55)}
+.aud-modal::backdrop{background:rgba(8,12,18,.55)}
+.aud-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:6px}
+.aud-head h2{margin:0}.aud-head h2 .muted{font-weight:500;font-size:13px;margin-left:6px}
+.aud-close{flex:0 0 auto;width:34px;height:34px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-size:20px;line-height:1;cursor:pointer}
+.aud-close:hover{border-color:var(--accent)}.aud-close:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .aud-row{display:grid;grid-template-columns:minmax(0,1fr) auto 64px minmax(80px,180px);gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
 .aud-l{min-width:0}.aud-n{font:600 15px var(--font-num);font-variant-numeric:tabular-nums;text-align:right}
 .aud-p{font:500 14px var(--font-num);color:var(--muted);text-align:right}
@@ -513,8 +519,8 @@ def render_followers_block(
     def tile_html(k, v, c, d):
         inner = f"<div class='k'>{esc(k)}</div><div class='v {c}'>{esc(v)}</div>{d}"
         if k in toggles:
-            return (f"<button type='button' class='kpi kpi-btn' aria-expanded='false' aria-controls='{toggles[k]}'>"
-                    f"{inner}<div class='kpi-more'>Tafsilot ▾</div></button>")
+            return (f"<button type='button' class='kpi kpi-btn' aria-haspopup='dialog' aria-controls='{toggles[k]}'>"
+                    f"{inner}<div class='kpi-more'>Tafsilot →</div></button>")
         return f"<div class='kpi'>{inner}</div>"
 
     parts = [head, "<div class='grid'>" + "".join(tile_html(*t) for t in tiles) + "</div>"]
@@ -593,23 +599,35 @@ def _audience_panels(aud: dict[str, Any], summary: dict[str, Any]) -> str:
     then_left = j.get("then_left") or {}
     joined_extra = (f"<p class='aud-extra'>Shulardan keyin chiqib ketgan: <b>{_n(then_left.get('n', 0))}</b> "
                     f"({then_left.get('pct', 0):g}%)</p>") if j["total"] else ""
+    def dialog(dlg_id: str, title: str, total: int, body: str) -> str:
+        return (
+            f"<dialog id='{dlg_id}' class='aud-modal' aria-labelledby='{dlg_id}-t'>"
+            f"<div class='aud-head'><h2 id='{dlg_id}-t'>{title} <span class='muted'>jurnal bo'yicha {_n(total)} ta</span></h2>"
+            "<button type='button' class='aud-close' aria-label='Yopish'>×</button></div>"
+            f"{body}{note}</dialog>"
+        )
+
     return (
-        f"<div id='aud-joined' class='card aud' hidden><h2>Qo'shilganlar: kimlar? <span class='muted'>"
-        f"jurnal bo'yicha {_n(j['total'])} ta</span></h2>{rows(j['groups'], 'up')}{joined_extra}{note}</div>"
-        f"<div id='aud-left' class='card aud' hidden><h2>Chiqib ketganlar: eski yoki yangi? <span class='muted'>"
-        f"jurnal bo'yicha {_n(lf['total'])} ta</span></h2>{rows(lf['groups'], 'down')}{note}</div>"
+        dialog("aud-joined", "Qo'shilganlar: kimlar?", j["total"], rows(j["groups"], "up") + joined_extra)
+        + dialog("aud-left", "Chiqib ketganlar: eski yoki yangi?", lf["total"], rows(lf["groups"], "down"))
         + AUDIENCE_SCRIPT
     )
 
 
 AUDIENCE_SCRIPT = r"""<script>(function(){
-var btns=document.querySelectorAll('.kpi-btn');
-btns.forEach(function(b){b.addEventListener('click',function(){
-  var id=b.getAttribute('aria-controls'),open=b.getAttribute('aria-expanded')!=='true';
-  btns.forEach(function(o){o.setAttribute('aria-expanded','false');
-    var p=document.getElementById(o.getAttribute('aria-controls'));if(p)p.hidden=true;});
-  b.setAttribute('aria-expanded',open?'true':'false');
-  var panel=document.getElementById(id);if(panel)panel.hidden=!open;});});
+// Kartochka bosilganda tafsilot alohida oynada (modal) ochiladi — sahifadagi bloklar siljimaydi.
+document.querySelectorAll('.kpi-btn').forEach(function(b){
+  var d=document.getElementById(b.getAttribute('aria-controls'));if(!d)return;
+  b.addEventListener('click',function(){
+    if(typeof d.showModal==='function'){d.showModal();}else{d.setAttribute('open','');}});
+  d.addEventListener('close',function(){b.focus();});
+});
+document.querySelectorAll('.aud-modal').forEach(function(d){
+  function close(){if(typeof d.close==='function'){d.close();}else{d.removeAttribute('open');}}
+  d.querySelector('.aud-close').addEventListener('click',close);
+  // Oynadan tashqariga (fonga) bosilsa yopiladi.
+  d.addEventListener('click',function(e){if(e.target===d)close();});
+});
 })();</script>"""
 
 
