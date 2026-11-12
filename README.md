@@ -108,8 +108,12 @@ Sozlamalar → Qurilmalar → "Junior Telegram dashboard" → Tugatish.
 Telegram eski kunlardagi jami obunachilar sonini keyinroq tuzatib turadi (masalan, o'chirilgan
 akkauntlar). Shuning uchun har oyning boshidagi son birinchi hisoblanganda bazaga
 (`tg:<kanal>:month_start:<YYYY-MM>`) bir marta yoziladi va keyin o'zgarmaydi; sof o'zgarish
-"oy oxiri − qotirilgan oy boshi" bo'yicha hisoblanadi. Qiymatni qayta hisoblatish kerak bo'lsa,
-Upstash konsolida shu kalitni o'chiring.
+"oy oxiri − qotirilgan oy boshi" bo'yicha hisoblanadi.
+
+"Oy boshida" kartochkasi har doim ko'rinadi (sayt standart holatda **Shu oy** bilan ochiladi; boshqa davr
+tanlansa, yonida alohida "Davr boshida" chiqadi). Kartochkadagi **✎ Tuzatish** orqali sonni qo'lda kiritish
+mumkin (Telegram'ning hozirgi hisobi taklif sifatida ko'rsatiladi); **Avtomatikka qaytarish** qo'lda
+kiritilganni o'chirib, sonni qayta hisoblatadi. `PLAN_PASSWORD` qo'yilgan bo'lsa, parol so'raladi.
 
 ## Plan bo'limi (sayt)
 

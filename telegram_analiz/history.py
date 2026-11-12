@@ -75,6 +75,9 @@ class JSONStore:
     def set(self, key: str, value: Any) -> None:
         self.store._command("SET", key, json.dumps(value, ensure_ascii=False))
 
+    def delete(self, key: str) -> None:
+        self.store._command("DEL", key)
+
     def set_once(self, key: str, value: Any) -> bool:
         """Kalit bo'sh bo'lsagina yozadi (SET NX). Yozilgan bo'lsa True."""
         return self.store._command("SET", key, json.dumps(value, ensure_ascii=False), "NX") == "OK"

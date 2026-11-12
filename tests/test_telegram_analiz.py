@@ -408,6 +408,8 @@ class FakeRedis:
                 result = "OK"
         elif cmd[0] == "GET":
             result = self.data.get(cmd[1])
+        elif cmd[0] == "DEL":
+            result = int(self.data.pop(cmd[1], None) is not None)
         else:
             result = None
 
@@ -590,7 +592,6 @@ class FrozenMonthStartTests(unittest.TestCase):
             # Telegram eski kunlarni "tuzatdi": barcha jami sonlar 40 ga kamaydi
             growth = raw["graphs"]["growth_graph"]["columns"][1]
             raw["graphs"]["growth_graph"]["columns"][1] = [growth[0]] + [v - 40 for v in growth[1:]]
-            mod._FROZEN.clear()  # yangi Vercel nusxasi — faqat bazadagi qiymat qoladi
             _, _, js, _ = mod.run({"month": ["2026-10"], "format": ["json"], "refresh": ["1"]})
             # refresh 302 qaytaradi; keyingi so'rov yangi ma'lumot bilan
             _, _, js, _ = mod.run({"month": ["2026-10"], "format": ["json"]})
@@ -605,3 +606,60 @@ class FrozenMonthStartTests(unittest.TestCase):
                         1000, "2026-11-01")
         self.assertEqual((s["start_total"], s["total_change"], s["mismatch"]), (1000, 100, -10))
         self.assertEqual((s["churn_pct"], s["growth_pct"], s["start_estimated"]), (4.0, 10.0, False))
+
+
+class ManualMonthStartTests(unittest.TestCase):
+    def _setup(self, env_extra=None):
+        from unittest import mock
+        from telegram_analiz.history import HistoryStore, JSONStore
+        mod, env, raw = FollowersTests._api(FollowersTests())
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("api_plan2", Path(__file__).parent.parent / "api" / "plan.py")
+        plan_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(plan_mod)
+        fake = FakeRedis()
+        plan_mod._store = lambda: JSONStore(HistoryStore("https://x", "t", opener=fake))
+        patch = mock.patch.object(mod.history, "store_from_env", lambda *a: HistoryStore("https://x", "t", opener=fake))
+        return mod, plan_mod, env, patch, fake
+
+    def test_manual_value_wins_and_can_be_reset(self):
+        mod, plan_mod, env, patch, fake = self._setup()
+        with env, patch:
+            os.environ.pop("PLAN_PASSWORD", None)
+            auto = json.loads(mod.run({"month": ["2026-10"], "format": ["json"]})[2])["followers"]["start_total"]
+            st, d = plan_mod.save_plan(json.dumps({"action": "month_start", "month": "2026-10", "total": "5000"}).encode())
+            self.assertEqual((st, d["total"]), (200, 5000))
+            f = json.loads(mod.run({"month": ["2026-10"], "format": ["json"]})[2])["followers"]
+            self.assertEqual((f["start_total"], f["start_manual"]), (5000, True))
+            self.assertEqual(f["total_change"], f["end_total"] - 5000)
+            _, _, body, _ = mod.run({"month": ["2026-10"]})
+            self.assertIn("1-okt holati · qo'lda", body.split("class='followers'")[1][:3000])
+            self.assertIn("id='ms-form'", body)
+            # avtomatikka qaytarish: kalit o'chadi, son qayta hisoblanadi va yana qotiriladi
+            self.assertEqual(plan_mod.save_plan(json.dumps({"action": "month_start", "month": "2026-10", "total": ""}).encode())[0], 200)
+            f = json.loads(mod.run({"month": ["2026-10"], "format": ["json"]})[2])["followers"]
+            self.assertEqual((f["start_total"], f["start_manual"]), (auto, False))
+
+    def test_password_and_validation(self):
+        mod, plan_mod, env, patch, _ = self._setup()
+        with env, patch, mock_env({"PLAN_PASSWORD": "sir"}):
+            body = {"action": "month_start", "month": "2026-11", "total": 5939}
+            self.assertEqual(plan_mod.save_plan(json.dumps(body).encode())[0], 403)
+            self.assertEqual(plan_mod.save_plan(json.dumps(body | {"password": "sir"}).encode())[0], 200)
+            self.assertEqual(plan_mod.save_plan(json.dumps(body | {"password": "sir", "total": "-3"}).encode())[0], 400)
+
+    def test_default_is_this_month_and_tile_always_shown(self):
+        mod, plan_mod, env, patch, _ = self._setup()
+        self.assertEqual(mod.DEFAULT_PRESET, "this_month")
+        with env, patch:
+            # 7 kunlik davr ham: "Oy boshida" + alohida "Davr boshida"
+            _, _, body, _ = mod.run({"from": ["2026-10-20"], "to": ["2026-10-27"]})
+        block = body.split("class='followers'")[1].split("<h2 class='sec'>Postlar</h2>")[0]
+        self.assertIn(">Oy boshida<", block)
+        self.assertIn(">Davr boshida<", block)
+        self.assertIn("1-okt holati", block)
+
+
+def mock_env(values):
+    from unittest import mock
+    return mock.patch.dict(os.environ, values, clear=False)

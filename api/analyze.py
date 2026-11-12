@@ -47,7 +47,7 @@ from telegram_analiz.report import (  # noqa: E402
 from telegram_analiz.scraper import _build_chat, fetch_page, normalize_channel, parse_page, parse_tz  # noqa: E402
 
 DEFAULT_CHANNEL = "junior_academy"  # sayt ochilganda shu kanal ko'rsatiladi
-DEFAULT_PRESET = "30"
+DEFAULT_PRESET = "this_month"  # sayt "Shu oy" bilan ochiladi
 TITLE = "Junior: Telegram"
 MAX_POSTS = 2500
 TIME_BUDGET = 40  # soniya; Vercel funksiyasi 60 soniyada to'xtatiladi
@@ -110,8 +110,6 @@ def admin_data(channel: str, min_fetched: float) -> dict | None:
     return entry
 
 
-# (kanal, "YYYY-MM") → {"total": oy boshidagi son, "recorded": qayd etilgan sana}
-_FROZEN: dict[tuple[str, str], dict] = {}
 
 
 def frozen_month_start(channel: str, year: int, month: int, series: dict, today: date) -> dict | None:
@@ -121,9 +119,6 @@ def frozen_month_start(channel: str, year: int, month: int, series: dict, today:
     hisoblansa "oy boshida" har kuni boshqacha chiqadi.
     """
     mk = plan.month_key(year, month)
-    cache_key = (channel, mk)
-    if cache_key in _FROZEN:
-        return _FROZEN[cache_key]
     if (year, month) > (today.year, today.month) or not series:
         return None
     base = history.store_from_env()
@@ -133,8 +128,7 @@ def frozen_month_start(channel: str, year: int, month: int, series: dict, today:
         try:
             saved = store.get(db_key)
             if saved and saved.get("total") is not None:
-                _FROZEN[cache_key] = saved
-                return saved
+                return saved  # har safar bazadan: qo'lda tuzatish darhol ko'rinadi
         except Exception as exc:  # noqa: BLE001
             print(f"[frozen] o'qib bo'lmadi: {exc}", flush=True)
     try:
@@ -153,7 +147,6 @@ def frozen_month_start(channel: str, year: int, month: int, series: dict, today:
     except Exception as exc:  # noqa: BLE001
         print(f"[frozen] yozib bo'lmadi: {exc}", flush=True)
         return None
-    _FROZEN[cache_key] = value
     return value
 
 
@@ -164,7 +157,7 @@ def with_frozen_start(summary: dict | None, channel: str, start: date | None, se
     frozen = frozen_month_start(channel, start.year, start.month, series, today)
     if not frozen:
         return summary
-    return admin_stats.apply_start(summary, frozen["total"], frozen.get("recorded"))
+    return admin_stats.apply_start(summary, frozen["total"], frozen.get("recorded"), bool(frozen.get("manual")))
 
 
 def followers_section(entry: dict | None, start: date | None, end: date | None, tz,
@@ -180,11 +173,25 @@ def followers_section(entry: dict | None, start: date | None, end: date | None, 
             summary = admin_stats.month_summary(series, s, e)
         except ExportError as exc:
             error = str(exc)
-        summary = with_frozen_start(summary, channel, s, series, today or date.today())
+        today = today or date.today()
+        summary = with_frozen_start(summary, channel, s, series, today)
+        # "Oy boshida" kartochkasi har doim: davr oxiri tushgan oy (masalan 7 kun tanlansa ham 1-noyabr).
+        ms, me = month_bounds(e.year, e.month)
+        try:
+            telegram_now = admin_stats.month_summary(series, ms, me)["start_total"]
+        except ExportError:
+            telegram_now = None
+        frozen = frozen_month_start(channel, e.year, e.month, series, today)
+        month_start = {"channel": channel, "month": plan.month_key(e.year, e.month), "date": ms.isoformat(),
+                       "total": (frozen or {}).get("total", telegram_now), "telegram": telegram_now,
+                       "recorded": (frozen or {}).get("recorded"), "manual": bool((frozen or {}).get("manual")),
+                       "frozen": frozen is not None}
+    else:
+        month_start = None
     sources = admin_stats.source_totals(entry["raw"] or {}, "new_followers_by_source_graph", start, end)
     fetched = f"olingan {_clock(entry['fetched'], tz)}" + (" · tarix saqlanmoqda" if entry.get("stored") else "")
     block = render_followers_block(summary=summary, raw=entry["raw"], sources=sources, error=error,
-                                   fetched_label=fetched)
+                                   fetched_label=fetched, month_start=month_start)
     return block, summary
 
 

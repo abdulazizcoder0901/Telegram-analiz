@@ -2,6 +2,7 @@
 
     GET  /api/plan?month=2026-11[&channel=junior_academy]   → {"month", "items", "protected", "storage"}
     POST /api/plan   {"month": "2026-11", "items": [...], "password": "..."}
+    POST /api/plan   {"action": "month_start", "month": "2026-11", "total": 5939}  (bo'sh total — avtomatik)
 
 Planlar Upstash Redis'da saqlanadi (KV_REST_API_URL / KV_REST_API_TOKEN).
 PLAN_PASSWORD muhit o'zgaruvchisi qo'yilsa, saqlash uchun shu parol kerak.
@@ -13,6 +14,7 @@ import hmac
 import json
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
@@ -63,6 +65,8 @@ def save_plan(body: bytes) -> tuple[int, dict]:
     password = os.environ.get("PLAN_PASSWORD")
     if password and not hmac.compare_digest(str(data.get("password") or ""), password):
         return 403, {"error": "Parol noto'g'ri", "protected": True}
+    if data.get("action") == "month_start":
+        return save_month_start(data)
     try:
         channel = _channel(data.get("channel"))
         y, m = plan.parse_month_key(str(data.get("month") or ""))
@@ -79,6 +83,35 @@ def save_plan(body: bytes) -> tuple[int, dict]:
         return 502, {"error": f"Bazaga yozib bo'lmadi: {exc}"}
     print(f"[plan] saqlandi: {channel} {month}, {len(items)} ta ko'rsatkich", flush=True)
     return 200, {"month": month, "items": items, "saved": True}
+
+
+def month_start_key(channel: str, month: str) -> str:
+    return f"tg:{channel}:month_start:{month}"
+
+
+def save_month_start(data: dict) -> tuple[int, dict]:
+    """Oy boshidagi obunachilar sonini qo'lda yozish; bo'sh qiymat — avtomatik hisobga qaytarish."""
+    try:
+        channel = _channel(data.get("channel"))
+        y, m = plan.parse_month_key(str(data.get("month") or ""))
+        total = plan._number(data.get("total"), "Oy boshidagi son")
+    except (ExportError, plan.PlanError) as exc:
+        return 400, {"error": str(exc)}
+    store = _store()
+    if not store:
+        return 503, {"error": "Baza (Upstash) ulanmagan."}
+    month = plan.month_key(y, m)
+    key = month_start_key(channel, month)
+    today = datetime.now(timezone(timedelta(hours=5))).date().isoformat()
+    try:
+        if total is None:
+            store.delete(key)
+        else:
+            store.set(key, {"total": total, "recorded": today, "manual": True})
+    except Exception as exc:  # noqa: BLE001
+        return 502, {"error": f"Bazaga yozib bo'lmadi: {exc}"}
+    print(f"[month_start] {channel} {month}: {'avtomatik' if total is None else total}", flush=True)
+    return 200, {"month": month, "total": total, "saved": True}
 
 
 class handler(BaseHTTPRequestHandler):  # Vercel shu nomni qidiradi

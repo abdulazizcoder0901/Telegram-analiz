@@ -282,7 +282,8 @@ def month_summary(series: dict[date, dict[str, Any]], start: date, end: date) ->
     }
 
 
-def apply_start(summary: dict[str, Any], start_total: float | None, recorded_on: str | None = None) -> dict[str, Any]:
+def apply_start(summary: dict[str, Any], start_total: float | None, recorded_on: str | None = None,
+                manual: bool = False) -> dict[str, Any]:
     """Oy boshidagi sonni qotirilgan qiymat bilan almashtirib, unga bog'liq ko'rsatkichlarni qayta hisoblaydi."""
     if start_total is None:
         return summary
@@ -291,6 +292,7 @@ def apply_start(summary: dict[str, Any], start_total: float | None, recorded_on:
     s["start_total"] = start_total
     s["start_estimated"] = False
     s["start_frozen_on"] = recorded_on
+    s["start_manual"] = manual
     s["total_change"] = (end_total - start_total) if end_total is not None else None
     s["mismatch"] = (end_total - (start_total + joined - left)) if end_total is not None else None
     s["churn_pct"] = round(100 * left / start_total, 2) if start_total else None
