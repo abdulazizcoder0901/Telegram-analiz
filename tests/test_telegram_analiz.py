@@ -408,6 +408,9 @@ class FakeRedis:
                 result = "OK"
         elif cmd[0] == "GET":
             result = self.data.get(cmd[1])
+        elif cmd[0] == "HMGET":
+            h = self.data.get(cmd[1], {})
+            result = [h.get(k) for k in cmd[2:]]
         elif cmd[0] == "DEL":
             result = int(self.data.pop(cmd[1], None) is not None)
         else:
@@ -663,3 +666,75 @@ class ManualMonthStartTests(unittest.TestCase):
 def mock_env(values):
     from unittest import mock
     return mock.patch.dict(os.environ, values, clear=False)
+
+
+class AudienceTests(unittest.TestCase):
+    def test_classify_groups_and_percentages(self):
+        from datetime import date, timedelta, timezone
+        from telegram_analiz.audience import classify
+        tz = timezone(timedelta(hours=5))
+        members = {
+            "a": {"j": ["2026-11-03T05:00:00+00:00"], "l": ["2026-11-06T05:00:00+00:00"]},   # shu oy qo'shilib chiqdi
+            "b": {"j": ["2026-10-20T05:00:00+00:00"], "l": ["2026-11-04T05:00:00+00:00"]},   # eski
+            "c": {"j": [], "l": ["2026-11-05T05:00:00+00:00"]},                                # join yozuvi yo'q
+            "d": {"j": ["2026-11-07T05:00:00+00:00"], "l": []},                                # yangi, qoldi
+            "e": {"j": ["2026-11-08T05:00:00+00:00"], "l": ["2026-10-25T05:00:00+00:00"]},   # qaytgan
+            "f": {"j": ["2026-10-31T19:30:00+00:00"], "l": []},  # UTC+5 da 1-noyabr — davrga kiradi
+        }
+        # kuzatuv 25-oktabrdan: davr (1-noyabr) boshidan oldin → join yozuvi yo'q chiqqan "eski"
+        r = classify(members, date(2026, 11, 1), date(2026, 11, 30), "2026-10-24T00:00:00+00:00", tz)
+        j = {g["key"]: g["n"] for g in r["joined"]["groups"]}
+        lf = {g["key"]: g["n"] for g in r["left"]["groups"]}
+        self.assertEqual((r["joined"]["total"], j), (4, {"new": 3, "returning": 1}))
+        self.assertEqual(r["joined"]["then_left"]["n"], 1)
+        self.assertEqual((r["left"]["total"], lf), (3, {"in_period": 1, "old": 2, "unknown": 0}))
+        self.assertTrue(r["complete"])
+        self.assertEqual(sum(g["pct"] for g in r["left"]["groups"]), 100.0)
+        # kuzatuv davr o'rtasida boshlangan bo'lsa — join yozuvisiz chiqqan "noma'lum"
+        r2 = classify(members, date(2026, 11, 1), date(2026, 11, 30), "2026-11-03T00:00:00+00:00", tz)
+        self.assertEqual({g["key"]: g["n"] for g in r2["left"]["groups"]}["unknown"], 1)
+        self.assertFalse(r2["complete"])
+
+    def test_member_log_dedup_and_hash(self):
+        from telegram_analiz.admin_stats import member_hash
+        from telegram_analiz.history import HistoryStore, MemberLog
+        fake = FakeRedis()
+        log = MemberLog(HistoryStore("https://x", "t", opener=fake))
+        h = member_hash(123456789, "secret")
+        self.assertEqual(len(h), 16)
+        self.assertNotIn("123456789", h)
+        self.assertNotEqual(h, member_hash(123456789, "boshqa"))
+        ev = [{"u": h, "t": "join", "at": "2026-11-10T10:00:00+00:00"},
+              {"u": h, "t": "leave", "at": "2026-11-11T10:00:00+00:00"}]
+        self.assertEqual(log.record("@Junior_Academy", ev, "2026-11-12T00:00:00+00:00"), 1)
+        self.assertEqual(log.record("junior_academy", ev, "2026-11-13T00:00:00+00:00"), 0)  # takror yozilmaydi
+        members, since = log.load("junior_academy")
+        self.assertEqual(members[h], {"j": ["2026-11-10T10:00:00+00:00"], "l": ["2026-11-11T10:00:00+00:00"]})
+        self.assertEqual(since, "2026-11-10T10:00:00+00:00")
+        self.assertNotIn("123456789", json.dumps(fake.data))
+
+    def test_fetch_collects_admin_log(self):
+        import asyncio
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+        try:
+            from telethon import types
+        except ImportError:
+            self.skipTest("telethon o'rnatilmagan")
+        from telegram_analiz.admin_stats import _member_events
+
+        class Client:
+            def iter_admin_log(self, entity, **kw):
+                assert kw == {"join": True, "leave": True, "invite": True}
+                evs = [types.ChannelAdminLogEventActionParticipantJoin(),
+                       types.ChannelAdminLogEventActionParticipantLeave(),
+                       types.ChannelAdminLogEventActionChangeTitle(prev_value="a", new_value="b")]
+
+                async def gen():
+                    for i, a in enumerate(evs):
+                        yield SimpleNamespace(original=SimpleNamespace(action=a), user_id=100 + i,
+                                              date=datetime(2026, 11, 11, 10, i, tzinfo=timezone.utc))
+                return gen()
+        events = asyncio.run(_member_events(Client(), None, "k"))
+        self.assertEqual([e["t"] for e in events], ["join", "leave"])
+        self.assertEqual(events[0]["at"], "2026-11-11T10:00:00+00:00")

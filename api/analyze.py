@@ -18,13 +18,13 @@ import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlencode, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from telegram_analiz import admin_stats, history, plan  # noqa: E402
+from telegram_analiz import admin_stats, audience, history, plan  # noqa: E402
 from telegram_analiz.analyzer import analyze  # noqa: E402
 from telegram_analiz.filters import (  # noqa: E402
     MONTHS_FULL,
@@ -106,8 +106,24 @@ def admin_data(channel: str, min_fetched: float) -> dict | None:
                  "series": history.merge(stored, previous.get("series") or {}),
                  "error": f"Telegram statistikasini olib bo'lmadi: {exc}", "stored": bool(store)}
         print(f"[admin] xato: {type(exc).__name__}: {exc}", flush=True)
+    # Obunachilar jurnali (qo'shilish/chiqish vaqtlari) — yangi/eski auditoriyani ajratish uchun.
+    entry.setdefault("members", previous_members(channel))
+    if store:
+        log = history.MemberLog(store)
+        try:
+            events = (entry.get("raw") or {}).get("member_events") or []
+            if entry.get("raw") is not None and "member_events" in entry["raw"]:
+                log.record(channel, events, datetime.now(timezone.utc).isoformat(timespec="seconds"))
+            members, since = log.load(channel)
+            entry["members"] = {"rows": members, "since": since}
+        except Exception as exc:  # noqa: BLE001
+            print(f"[members] xato: {type(exc).__name__}: {exc}", flush=True)
     _ADMIN[channel] = entry
     return entry
+
+
+def previous_members(channel: str) -> dict:
+    return (_ADMIN.get(channel) or {}).get("members") or {"rows": {}, "since": None}
 
 
 
@@ -189,6 +205,15 @@ def followers_section(entry: dict | None, start: date | None, end: date | None, 
     else:
         month_start = None
     sources = admin_stats.source_totals(entry["raw"] or {}, "new_followers_by_source_graph", start, end)
+    members = entry.get("members") or {}
+    aud = None
+    if members.get("rows") or members.get("since"):
+        period_start = start or (date.fromisoformat(summary["from"]) if summary else None)
+        aud = audience.classify(members.get("rows") or {}, period_start, end, members.get("since"), tz)
+        aud["log_by_day"] = audience.events_by_day((entry.get("raw") or {}).get("member_events") or [], tz)
+        aud["log_error"] = (entry.get("raw") or {}).get("member_events_error")
+        if summary is not None:
+            summary = dict(summary, audience=aud)
     fetched = f"olingan {_clock(entry['fetched'], tz)}" + (" · tarix saqlanmoqda" if entry.get("stored") else "")
     block = render_followers_block(summary=summary, raw=entry["raw"], sources=sources, error=error,
                                    fetched_label=fetched, month_start=month_start)

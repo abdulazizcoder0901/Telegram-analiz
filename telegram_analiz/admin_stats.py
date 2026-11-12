@@ -34,7 +34,39 @@ GRAPHS = ("growth_graph", "followers_graph", "mute_graph", "new_followers_by_sou
 
 # ---------------------------------------------------------------- yig'ish (Telethon)
 
-async def _fetch_async(client, channel: str) -> dict[str, Any]:
+def member_hash(user_id: int, key: str | None) -> str:
+    """Obunachi ID'sini bazada ochiq saqlamaslik uchun: HMAC-SHA256 (kalit — TG_API_HASH), 16 belgi."""
+    import hashlib
+    import hmac as _hmac
+
+    secret = (key or "telegram-analiz").encode()
+    return _hmac.new(secret, str(user_id).encode(), hashlib.sha256).hexdigest()[:16]
+
+
+async def _member_events(client, entity, hash_key: str | None) -> list[dict[str, str]]:
+    """Admin log'dagi qo'shilish/chiqish hodisalari (Telegram oxirgi 48 soatni saqlaydi)."""
+    from telethon import types
+
+    join_types = tuple(getattr(types, n) for n in (
+        "ChannelAdminLogEventActionParticipantJoin", "ChannelAdminLogEventActionParticipantJoinByInvite",
+        "ChannelAdminLogEventActionParticipantJoinByRequest", "ChannelAdminLogEventActionParticipantInvite",
+    ) if hasattr(types, n))
+    events = []
+    async for ev in client.iter_admin_log(entity, join=True, leave=True, invite=True):
+        action = ev.original.action
+        if isinstance(action, types.ChannelAdminLogEventActionParticipantLeave):
+            kind = "leave"
+        elif isinstance(action, join_types):
+            kind = "join"
+        else:
+            continue
+        when = ev.date if ev.date.tzinfo else ev.date.replace(tzinfo=timezone.utc)
+        events.append({"u": member_hash(ev.user_id, hash_key), "t": kind,
+                       "at": when.astimezone(timezone.utc).isoformat(timespec="seconds")})
+    return events
+
+
+async def _fetch_async(client, channel: str, hash_key: str | None = None) -> dict[str, Any]:
     from telethon import errors, functions, types
 
     entity = await client.get_input_entity(channel)
@@ -65,6 +97,13 @@ async def _fetch_async(client, channel: str) -> dict[str, Any]:
         if sender is not None:
             await client._return_exported_sender(sender)
 
+    member_events: list = []
+    member_error = None
+    try:
+        member_events = await _member_events(client, entity, hash_key)
+    except Exception as exc:  # noqa: BLE001 — jurnal bo'lmasa ham statistika ishlayversin
+        member_error = f"{type(exc).__name__}: {exc}"
+
     def abs_value(v):
         return {"current": v.current, "previous": v.previous} if v is not None else None
 
@@ -82,6 +121,8 @@ async def _fetch_async(client, channel: str) -> dict[str, Any]:
         "enabled_notifications": percent(stats.enabled_notifications),
         "graphs": graphs,
         "graph_errors": graph_errors,
+        "member_events": member_events,
+        "member_events_error": member_error,
     }
 
 
@@ -110,7 +151,7 @@ def fetch_stats(channel: str, api_id: int, api_hash: str, session: str = "telegr
             await client.start()  # birinchi marta telefon raqam va kod so'raydi
         async with client:
             try:
-                return await _fetch_async(client, channel)
+                return await _fetch_async(client, channel, api_hash)
             except errors.ChatAdminRequiredError as exc:
                 raise ExportError(
                     "Statistika yopiq: akkauntingiz bu kanalda admin emas yoki kanalda statistika "

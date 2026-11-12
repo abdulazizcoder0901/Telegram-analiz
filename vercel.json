@@ -11,5 +11,11 @@
       "source": "/",
       "destination": "/api/analyze"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/analyze?refresh=1&format=json",
+      "schedule": "17 2 * * *"
+    }
   ]
 }
