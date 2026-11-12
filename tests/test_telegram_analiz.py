@@ -636,7 +636,8 @@ class ManualMonthStartTests(unittest.TestCase):
             self.assertEqual((f["start_total"], f["start_manual"]), (5000, True))
             self.assertEqual(f["total_change"], f["end_total"] - 5000)
             _, _, body, _ = mod.run({"month": ["2026-10"]})
-            self.assertIn("1-okt holati · qo'lda", body.split("class='followers'")[1][:3000])
+            self.assertIn("1-okt holati</div>", body.split("class='followers'")[1][:3000])
+            self.assertNotIn("qo'lda", body.split("class='followers'")[1][:3000])  # belgi ko'rsatilmaydi
             self.assertNotIn("ms-form", body)  # sahifada tuzatish formasi/tugmasi yo'q
             self.assertNotIn("Tuzatish", body)
             # avtomatikka qaytarish: kalit o'chadi, son qayta hisoblanadi va yana qotiriladi

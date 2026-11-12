@@ -477,8 +477,7 @@ def render_followers_block(
     ms_sub = ""
     if ms or starts_on_first:
         d = date_of(ms.get("date") or start)
-        ms_sub = (f"<div class='d'>{d.day}-{_MONTHS_SHORT[d.month]} holati"
-                  + (" · qo'lda" if ms.get("manual") else "") + "</div>")
+        ms_sub = f"<div class='d'>{d.day}-{_MONTHS_SHORT[d.month]} holati</div>"
     tiles = [
         ("Obunachilar", num((raw.get("followers") or {}).get("current") or summary["end_total"]),
          "", tg_delta(raw.get("followers"))),
@@ -538,10 +537,7 @@ def render_followers_block(
             ["Manba", "Obunachilar", "Ulush"],
             [[name, int(v), f"{100 * v / total:.1f}%"] for name, v in sources]) + "</div>")
     notes = []
-    if summary.get("start_manual"):
-        notes.append(f"Oy boshidagi son qo'lda kiritilgan ({summary['start_frozen_on']}); sof o'zgarish shu songa "
-                     "nisbatan hisoblanadi.")
-    elif summary.get("start_frozen_on"):
+    if summary.get("start_frozen_on"):
         notes.append(f"Oy boshidagi son ({summary['from']} holati) {summary['start_frozen_on']} da qayd etilgan va "
                      "boshqa o'zgarmaydi; sof o'zgarish shu songa nisbatan hisoblanadi.")
     if not summary["complete"]:
