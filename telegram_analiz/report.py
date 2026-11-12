@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+from datetime import datetime
 from typing import Any
 
 from .analyzer import WEEKDAYS
@@ -210,7 +211,7 @@ CSS = """
 --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--font-num:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#11161d;--card:#18202a;--fg:#e6ebf1;--muted:#93a1b1;--line:#28323e;--accent:#5ea4f0;--on-accent:#0b1420;--chip:#1d2b3b;--good:#4cc38a;--bad:#ef7a6f;--warn:#e0a84a;color-scheme:dark}}
 :root[data-theme="dark"]{--bg:#11161d;--card:#18202a;--fg:#e6ebf1;--muted:#93a1b1;--line:#28323e;--accent:#5ea4f0;--on-accent:#0b1420;--chip:#1d2b3b;--good:#4cc38a;--bad:#ef7a6f;--warn:#e0a84a;color-scheme:dark}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 var(--font-body)}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 var(--font-body)}
 main{max-width:1080px;margin:0 auto;padding-block:28px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 h1{font-size:28px;line-height:1.2;margin:0 0 4px;text-wrap:balance}h2{font-size:16px;margin:0 0 12px;text-wrap:balance}
 .muted{color:var(--muted)}.desc{white-space:pre-line;max-width:65ch}
@@ -266,6 +267,18 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
 details.card summary{cursor:pointer;font-weight:600}details.card[open] summary{margin-bottom:10px}
 .setup{border-style:dashed}
+.kpi-btn{font:inherit;color:inherit;text-align:left;cursor:pointer;width:100%;display:block}
+.kpi-btn:hover{border-color:var(--accent)}.kpi-btn[aria-expanded=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.kpi-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.kpi-more{font-size:12px;color:var(--accent);margin-top:6px}
+.aud{margin:0 0 12px}.aud h2 .muted{font-weight:500;font-size:13px;margin-left:6px}
+.aud-row{display:grid;grid-template-columns:minmax(0,1fr) auto 64px minmax(80px,180px);gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.aud-l{min-width:0}.aud-n{font:600 15px var(--font-num);font-variant-numeric:tabular-nums;text-align:right}
+.aud-p{font:500 14px var(--font-num);color:var(--muted);text-align:right}
+.aud-bar{height:8px;border-radius:999px;background:var(--chip);position:relative;overflow:hidden}
+.aud-bar i{position:absolute;inset:0 auto 0 0;border-radius:999px}.aud-bar.up i{background:var(--good)}.aud-bar.down i{background:var(--bad)}
+.aud-extra{margin:10px 0 0;font-size:14px}.aud-extra b{font-family:var(--font-num)}
+@media (max-width:560px){.aud-row{grid-template-columns:minmax(0,1fr) auto 56px}.aud-bar{grid-column:1/-1}}
 .ms-edit,.linkish{background:none;border:0;padding:0;margin-top:6px;font:500 13px var(--font-body);color:var(--accent);cursor:pointer}
 .ms-edit:hover,.linkish:hover{text-decoration:underline}
 .ms-edit:focus-visible,.linkish:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -494,9 +507,19 @@ def render_followers_block(
         if v and v.get("current") is not None:
             tiles.append((label, num(v["current"]), "", tg_delta(v)))
 
-    parts = [head, "<div class='grid'>" + "".join(
-        f"<div class='kpi'><div class='k'>{esc(k)}</div><div class='v {c}'>{esc(v)}</div>{d}</div>"
-        for k, v, c, d in tiles) + "</div>"]
+    aud = summary.get("audience")
+    toggles = {"Qo'shildi": "aud-joined", "Chiqib ketdi": "aud-left"} if aud else {}
+
+    def tile_html(k, v, c, d):
+        inner = f"<div class='k'>{esc(k)}</div><div class='v {c}'>{esc(v)}</div>{d}"
+        if k in toggles:
+            return (f"<button type='button' class='kpi kpi-btn' aria-expanded='false' aria-controls='{toggles[k]}'>"
+                    f"{inner}<div class='kpi-more'>Tafsilot ▾</div></button>")
+        return f"<div class='kpi'>{inner}</div>"
+
+    parts = [head, "<div class='grid'>" + "".join(tile_html(*t) for t in tiles) + "</div>"]
+    if aud:
+        parts.append(_audience_panels(aud, summary))
     if ms:
         parts.append(_month_start_form(ms))
 
@@ -540,6 +563,54 @@ def render_followers_block(
     parts.append("".join(f"<p class='muted note'>{esc(n)}</p>" for n in notes))
     parts.append("</section><h2 class='sec'>Postlar</h2>")
     return "".join(parts)
+
+
+def _audience_panels(aud: dict[str, Any], summary: dict[str, Any]) -> str:
+    """"Qo'shildi" / "Chiqib ketdi" bosilganda ochiladigan panellar: guruhlar soni va foizi."""
+    esc = html.escape
+
+    def rows(groups: list[dict[str, Any]], cls: str) -> str:
+        return "".join(
+            f"<div class='aud-row'><span class='aud-l'>{esc(g['label'])}</span>"
+            f"<span class='aud-n'>{_n(g['n'])}</span><span class='aud-p'>{g['pct']:g}%</span>"
+            f"<span class='aud-bar {cls}'><i style='width:{min(100, g['pct'])}%'></i></span></div>"
+            for g in groups if g["n"] or g["key"] != "unknown"
+        )
+
+    since = aud.get("tracking_since")
+    since_txt = ""
+    if since:
+        dt = datetime.fromisoformat(since)
+        since_txt = f"{dt.day}-{_MONTHS_SHORT[dt.month]} {dt:%H:%M}"
+    j, lf = aud["joined"], aud["left"]
+    note = (f"<p class='muted note'>Telegram'ning \"So'nggi harakatlar\" jurnali bo'yicha (kuzatuv {esc(since_txt)} dan; "
+            "Telegram jurnalni 48 soat saqlaydi, shuning uchun undan oldingi qo'shilish vaqtlari noma'lum). "
+            f"Jurnalda: +{_n(j['total'])} / −{_n(lf['total'])}; grafikda: +{_n(int(summary['joined']))} / "
+            f"−{_n(int(summary['left']))}.</p>")
+    if not aud.get("complete"):
+        note += ("<p class='muted note'>Kuzatuv davr o'rtasida boshlangani uchun bu davr to'liq emas; "
+                 "keyingi oydan boshlab ajratish to'liq bo'ladi.</p>")
+    then_left = j.get("then_left") or {}
+    joined_extra = (f"<p class='aud-extra'>Shulardan keyin chiqib ketgan: <b>{_n(then_left.get('n', 0))}</b> "
+                    f"({then_left.get('pct', 0):g}%)</p>") if j["total"] else ""
+    return (
+        f"<div id='aud-joined' class='card aud' hidden><h2>Qo'shilganlar: kimlar? <span class='muted'>"
+        f"jurnal bo'yicha {_n(j['total'])} ta</span></h2>{rows(j['groups'], 'up')}{joined_extra}{note}</div>"
+        f"<div id='aud-left' class='card aud' hidden><h2>Chiqib ketganlar: eski yoki yangi? <span class='muted'>"
+        f"jurnal bo'yicha {_n(lf['total'])} ta</span></h2>{rows(lf['groups'], 'down')}{note}</div>"
+        + AUDIENCE_SCRIPT
+    )
+
+
+AUDIENCE_SCRIPT = r"""<script>(function(){
+var btns=document.querySelectorAll('.kpi-btn');
+btns.forEach(function(b){b.addEventListener('click',function(){
+  var id=b.getAttribute('aria-controls'),open=b.getAttribute('aria-expanded')!=='true';
+  btns.forEach(function(o){o.setAttribute('aria-expanded','false');
+    var p=document.getElementById(o.getAttribute('aria-controls'));if(p)p.hidden=true;});
+  b.setAttribute('aria-expanded',open?'true':'false');
+  var panel=document.getElementById(id);if(panel)panel.hidden=!open;});});
+})();</script>"""
 
 
 _MONTHS_SHORT = ["", "yan", "fev", "mar", "apr", "may", "iyun", "iyul", "avg", "sen", "okt", "noy", "dek"]

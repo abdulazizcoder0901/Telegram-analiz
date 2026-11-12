@@ -115,6 +115,21 @@ tanlansa, yonida alohida "Davr boshida" chiqadi). Kartochkadagi **✎ Tuzatish**
 mumkin (Telegram'ning hozirgi hisobi taklif sifatida ko'rsatiladi); **Avtomatikka qaytarish** qo'lda
 kiritilganni o'chirib, sonni qayta hisoblatadi. `PLAN_PASSWORD` qo'yilgan bo'lsa, parol so'raladi.
 
+### Yangi va eski auditoriya
+
+"Qo'shildi" va "Chiqib ketdi" kartochkalari bosilsa, tafsilot ochiladi:
+
+* **Qo'shilganlar:** birinchi marta qo'shilganlar / qaytganlar (oldin chiqib ketgan), va ulardan
+  keyin chiqib ketganlar soni va foizi.
+* **Chiqib ketganlar:** shu davrda qo'shilganlar (yangi auditoriya) / eski obunachilar (davrdan oldin
+  qo'shilgan) / noma'lum.
+
+Manba — kanalning "So'nggi harakatlar" (admin log) jurnali: kim qachon qo'shilgan va chiqqan.
+Telegram uni faqat 48 soat saqlaydi, shuning uchun sayt jurnalni yig'ib, Upstash'da saqlab boradi
+(`tg:<kanal>:members`; obunachi ID'lari faqat HMAC-xesh ko'rinishida, ism/username saqlanmaydi).
+Sayt ochilmasa ham har kuni bir marta yig'ish uchun `vercel.json` da cron bor. Kuzatuv boshlanishidan
+oldin qo'shilganlar "noma'lum" bo'ladi; to'liq ajratish kuzatuv boshlangan keyingi oydan.
+
 ## Plan bo'limi (sayt)
 
 "Asosiy" va "Tavsiyalar" orasidagi **Plan** bo'limida har oy uchun maqsadlar kiritiladi va fakt bilan

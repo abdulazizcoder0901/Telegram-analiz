@@ -738,3 +738,29 @@ class AudienceTests(unittest.TestCase):
         events = asyncio.run(_member_events(Client(), None, "k"))
         self.assertEqual([e["t"] for e in events], ["join", "leave"])
         self.assertEqual(events[0]["at"], "2026-11-11T10:00:00+00:00")
+
+
+class AudiencePanelTests(unittest.TestCase):
+    def test_tiles_become_buttons_with_panels(self):
+        from unittest import mock
+        from telegram_analiz.history import HistoryStore
+        mod, env, raw = FollowersTests._api(FollowersTests())
+        raw["member_events"] = [
+            {"u": "a1", "t": "join", "at": "2026-10-10T05:00:00+00:00"},
+            {"u": "a1", "t": "leave", "at": "2026-10-12T05:00:00+00:00"},
+            {"u": "b2", "t": "join", "at": "2026-10-11T05:00:00+00:00"},
+        ]
+        fake = FakeRedis()
+        with env, mock.patch.object(mod.history, "store_from_env", lambda *a: HistoryStore("https://x", "t", opener=fake)):
+            _, _, body, _ = mod.run({"month": ["2026-10"]})
+            js = json.loads(mod.run({"month": ["2026-10"], "format": ["json"]})[2])
+        aud = js["followers"]["audience"]
+        self.assertEqual((aud["joined"]["total"], aud["left"]["total"]), (2, 1))
+        self.assertEqual({g["key"]: g["n"] for g in aud["left"]["groups"]}["in_period"], 1)
+        block = body.split("class='followers'")[1]
+        self.assertIn("aria-controls='aud-joined'", block)
+        self.assertIn("aria-controls='aud-left'", block)
+        self.assertIn("id='aud-left' class='card aud' hidden", block)
+        self.assertIn("Shu davrda qo&#x27;shilganlar (yangi auditoriya)", block)
+        self.assertNotIn("a1", json.dumps(js["followers"]))  # xesh ham sahifaga chiqmaydi
+        self.assertIn("[hidden]{display:none!important}", body)  # yashirin forma/panellar ko'rinmasin
