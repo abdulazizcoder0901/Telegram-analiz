@@ -15,7 +15,7 @@ from typing import Any
 # Sotuv / reklama postini taxminan aniqlash uchun so'zlar (o'zbek lotin va kirill, rus).
 PROMO_RE = re.compile(
     r"narx|chegirma|skidka|aksiya|sotuv|to['ʻ’`]?lov|so['ʻ’`]?m\b|ro['ʻ’`]?yxatdan|"
-    r"adminga|murojaat|joylar soni|joy qoldi|bepul dars|kursga yoziling|"
+    r"adminga|murojaat|joylar soni|joy qoldi|bepul dars|kurs\w*\s+yozil|"
     r"нарх|чегирма|скидк|акци|цена|оплат|запис",
     re.IGNORECASE,
 )
@@ -132,9 +132,10 @@ def analyze_churn(days: list[dict[str, Any]], posts: list[Any], members: dict[st
             out["median_days_to_leave"] = round(med, 1)
             out["median_hours_to_leave"] = round(med * 24, 1)
             if med < 1 and len(to_leave_days) >= 10:
+                when = (f"{max(1, round(med * 24 * 60))} daqiqa" if med * 24 < 1 else f"{round(med * 24)} soat")
                 out["findings"].append(
-                    f"Jurnal bo'yicha chiqib ketganlarning yarmi qo'shilgandan keyin {max(1, round(med * 24))} soat "
-                    "ichida ketgan — kanalga kirib, birinchi ko'rgan postlarida o'zlariga kerakli narsani topmayapti.")
+                    f"Jurnal bo'yicha chiqib ketganlarning yarmi qo'shilgandan keyin {when} ichida ketgan — kanalga "
+                    "kirib, birinchi ko'rgan postlarida o'zlariga kerakli narsani topmayapti.")
         if len(leaves) >= 20 and posts:
             post_times = sorted(m.date.replace(tzinfo=tz) for m in posts if getattr(m, "kind", "message") == "message")
             start, end = min(leaves), max(leaves)

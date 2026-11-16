@@ -1009,3 +1009,19 @@ class ChurnFastLeaveTests(unittest.TestCase):
         self.assertEqual(r["median_hours_to_leave"], 3.0)
         self.assertIn("3 soat ichida ketgan", " ".join(r["findings"]))
         self.assertIn("3 soatda ketgan", render_churn_card(r))
+
+
+class ChurnWordingTests(unittest.TestCase):
+    def test_minutes_and_course_signup_promo(self):
+        from datetime import date, datetime, timedelta, timezone
+        from telegram_analiz.churn import _is_promo, analyze_churn
+        from telegram_analiz.report import render_churn_card
+        self.assertTrue(_is_promo("Junior Akademiyasi kurslariga yoziling"))
+        self.assertFalse(_is_promo("Farzandingiz bir kunda qancha vaqt telefonda?"))
+        days = [{"date": (date(2026, 11, 1) + timedelta(days=i)).isoformat(), "joined": 10, "left": 10} for i in range(10)]
+        j = datetime(2026, 11, 3, 6, 0, tzinfo=timezone.utc)
+        members = {f"u{u}": {"j": [j.isoformat()], "l": [(j + timedelta(minutes=12)).isoformat()] if u < 12 else []}
+                   for u in range(30)}
+        r = analyze_churn(days, [], members, timezone(timedelta(hours=5)), today=date(2026, 11, 30))
+        self.assertIn("12 daqiqa ichida ketgan", " ".join(r["findings"]))
+        self.assertIn("~12 daqiqada ketgan", render_churn_card(r))
