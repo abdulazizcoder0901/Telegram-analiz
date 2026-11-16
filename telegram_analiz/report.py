@@ -1047,7 +1047,10 @@ def render_churn_card(ins: dict[str, Any] | None) -> str:
                      f"</tr></thead><tbody>{''.join(rows)}</tbody></table></div>")
     extra = []
     if ins.get("median_days_to_leave") is not None:
-        extra.append(f"chiqib ketganlar qo'shilgandan keyin o'rtacha (mediana) {ins['median_days_to_leave']:g} kunda ketgan")
+        if ins["median_days_to_leave"] < 1:
+            extra.append(f"chiqib ketganlar qo'shilgandan keyin o'rtacha (mediana) {ins['median_hours_to_leave']:g} soatda ketgan")
+        else:
+            extra.append(f"chiqib ketganlar qo'shilgandan keyin o'rtacha (mediana) {ins['median_days_to_leave']:g} kunda ketgan")
     peak = ins.get("leave_peak_hour")
     if peak:
         extra.append(f"eng ko'p chiqish soati — {peak['hour']:02d}:00 ({peak['n']} / {peak['of']})")

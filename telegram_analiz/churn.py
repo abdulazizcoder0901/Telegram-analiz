@@ -128,7 +128,13 @@ def analyze_churn(days: list[dict[str, Any]], posts: list[Any], members: dict[st
                     f"Jurnal bo'yicha yangi qo'shilganlarning {round(100 * fast / joins)}% ({fast} / {joins}) "
                     "2 kun ichida chiqib ketgan — ular kanaldan kutganini topmayapti.")
         if to_leave_days:
-            out["median_days_to_leave"] = round(statistics.median(to_leave_days), 1)
+            med = statistics.median(to_leave_days)
+            out["median_days_to_leave"] = round(med, 1)
+            out["median_hours_to_leave"] = round(med * 24, 1)
+            if med < 1 and len(to_leave_days) >= 10:
+                out["findings"].append(
+                    f"Jurnal bo'yicha chiqib ketganlarning yarmi qo'shilgandan keyin {max(1, round(med * 24))} soat "
+                    "ichida ketgan — kanalga kirib, birinchi ko'rgan postlarida o'zlariga kerakli narsani topmayapti.")
         if len(leaves) >= 20 and posts:
             post_times = sorted(m.date.replace(tzinfo=tz) for m in posts if getattr(m, "kind", "message") == "message")
             start, end = min(leaves), max(leaves)

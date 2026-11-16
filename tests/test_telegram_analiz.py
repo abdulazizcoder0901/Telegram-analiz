@@ -960,6 +960,7 @@ class ChurnTests(unittest.TestCase):
         self.assertEqual(r["fast_churn"], {"joined": 60, "left_within_2d": 24, "pct": 40.0})
         self.assertGreater(r["after_post"]["pct"], r["after_post"]["expected_pct"])
         text = " ".join(r["findings"])
+        self.assertEqual(r["median_hours_to_leave"], 26.0)
         for part in ("Eng ko'p chiqish 13.11", "Sotuvga oid post", "Kuniga 3 va undan ko'p post", "2 kun ichida chiqib ketgan"):
             self.assertIn(part, text)
         tips = " ".join(r["recommendations"])
@@ -992,3 +993,19 @@ class ChurnTests(unittest.TestCase):
                      if False else "Ko'p chiqish bo'lgan kunlar", "<td>13-noy</td><td>−90</td>", "href='https://t.me/ch/"):
             self.assertIn(part, html_)
         self.assertEqual(render_churn_card(None), "")
+
+
+class ChurnFastLeaveTests(unittest.TestCase):
+    def test_same_day_leavers_reported_in_hours(self):
+        from datetime import date, datetime, timedelta, timezone
+        from telegram_analiz.churn import analyze_churn
+        from telegram_analiz.report import render_churn_card
+        days = [{"date": (date(2026, 11, 1) + timedelta(days=i)).isoformat(), "joined": 10, "left": 10} for i in range(10)]
+        members = {}
+        for u in range(30):
+            j = datetime(2026, 11, 3, 6, 0, tzinfo=timezone.utc)
+            members[f"u{u}"] = {"j": [j.isoformat()], "l": [(j + timedelta(hours=3)).isoformat()] if u < 12 else []}
+        r = analyze_churn(days, [], members, timezone(timedelta(hours=5)), today=date(2026, 11, 30))
+        self.assertEqual(r["median_hours_to_leave"], 3.0)
+        self.assertIn("3 soat ichida ketgan", " ".join(r["findings"]))
+        self.assertIn("3 soatda ketgan", render_churn_card(r))
