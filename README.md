@@ -139,6 +139,14 @@ Telegram uni faqat 48 soat saqlaydi, shuning uchun sayt jurnalni yig'ib, Upstash
 Sayt ochilmasa ham har kuni bir marta yig'ish uchun `vercel.json` da cron bor. Kuzatuv boshlanishidan
 oldin qo'shilganlar "noma'lum" bo'ladi; to'liq ajratish kuzatuv boshlangan keyingi oydan.
 
+### Nega obunachilar chiqib ketmoqda (Tavsiyalar bo'limi)
+
+Telegram sababini aytmaydi, shuning uchun sayt bog'liqliklarni qidiradi va ularga mos tavsiya beradi:
+odatdagidan ko'p chiqish bo'lgan kunlar va o'sha kungi postlar, sotuvga oid postlar (narx, chegirma,
+"adminga yozing") va kuniga post soni bilan chiqishlar, yangi kelganlarning 2 kun ichida ketish ulushi,
+post chiqqandan keyingi 3 soatdagi chiqishlar va eng ko'p chiqish soati. Bu isbot emas, nimani sinab
+ko'rishni ko'rsatadi.
+
 ## Plan bo'limi (sayt)
 
 "Asosiy" va "Tavsiyalar" orasidagi **Plan** bo'limida har oy uchun maqsadlar kiritiladi va fakt bilan

@@ -916,3 +916,79 @@ class SourceTests(unittest.TestCase):
         for text in ("Qayerdan keldi", "Qidiruv", "Manbalar kunlar bo'yicha", "Taklif havolasi: Reklama"):
             self.assertIn(text, dlg)
         self.assertIn("<td>31-okt</td>", dlg.split("Manbalar kunlar")[1])
+
+
+class ChurnTests(unittest.TestCase):
+    def _data(self):
+        from datetime import date, datetime, timedelta, timezone
+        from telegram_analiz.loader import Message
+        tz = timezone(timedelta(hours=5))
+        days, posts = [], []
+        for i in range(20):
+            d = date(2026, 11, 1) + timedelta(days=i)
+            promo = i % 5 == 0          # har 5-kuni sotuv posti
+            many = i % 4 == 1           # ba'zi kunlari 3 ta post
+            left = 20 + (30 if promo else 0) + (20 if many else 0)
+            if i == 12:
+                left = 90               # keskin ko'p chiqish kuni
+            days.append({"date": d.isoformat(), "joined": 30, "left": left})
+            n = 3 if many else 1
+            for k in range(n):
+                text = "Kurs narxi 500 ming so'm, adminga yozing" if (promo and k == 0) else f"Foydali maslahat {i}-{k}"
+                posts.append(Message(id=i * 10 + k, date=datetime(d.year, d.month, d.day, 10 + 3 * k), sender="ch",
+                                     sender_id="ch", text=text, kind="message", link=f"https://t.me/ch/{i * 10 + k}"))
+        # jurnal: 60 ta qo'shilgan, 24 tasi 1 kunda chiqqan; chiqishlar post (10:00 +5) dan keyin 1 soatda
+        members = {}
+        for u in range(60):
+            j = datetime(2026, 11, 2 + u % 15, 4, 0, tzinfo=timezone.utc)
+            row = {"j": [j.isoformat()], "l": []}
+            if u < 24:
+                row["l"].append((j + timedelta(days=1, hours=2)).isoformat())  # = 11:00 +5, postdan 1 soat keyin
+            members[f"u{u}"] = row
+        return days, posts, members, tz
+
+    def test_findings_and_recommendations(self):
+        from datetime import date
+        from telegram_analiz.churn import analyze_churn
+        days, posts, members, tz = self._data()
+        r = analyze_churn(days, posts, members, tz, today=date(2026, 11, 30))
+        self.assertEqual(r["spikes"][0]["date"], "2026-11-13")
+        self.assertEqual(r["spikes"][0]["left"], 90)
+        self.assertTrue(r["spikes"][0]["posts"])
+        self.assertGreaterEqual(r["promo_ratio"], 1.15)
+        self.assertGreaterEqual(r["post_count_ratio"], 1.2)
+        self.assertEqual(r["fast_churn"], {"joined": 60, "left_within_2d": 24, "pct": 40.0})
+        self.assertGreater(r["after_post"]["pct"], r["after_post"]["expected_pct"])
+        text = " ".join(r["findings"])
+        for part in ("Eng ko'p chiqish 13.11", "Sotuvga oid post", "Kuniga 3 va undan ko'p post", "2 kun ichida chiqib ketgan"):
+            self.assertIn(part, text)
+        tips = " ".join(r["recommendations"])
+        for part in ("xush kelibsiz", "Sotuv postlarini kamaytiring", "Kuniga 1–2 ta postdan", "interaktiv"):
+            self.assertIn(part, tips)
+
+    def test_quiet_channel_has_only_general_tips(self):
+        from datetime import date, timedelta
+        from telegram_analiz.churn import analyze_churn
+        days = [{"date": (date(2026, 11, 1) + timedelta(days=i)).isoformat(), "joined": 10, "left": 10} for i in range(10)]
+        r = analyze_churn(days, [], None, None, today=date(2026, 11, 30))
+        self.assertEqual((r["findings"], r["spikes"]), ([], []))
+        self.assertEqual(len(r["recommendations"]), 2)
+        self.assertEqual(analyze_churn(days[:2], [], None, None, today=date(2026, 11, 30))["findings"], [])
+
+    def test_today_is_excluded(self):
+        from datetime import date
+        from telegram_analiz.churn import analyze_churn
+        days, posts, members, tz = self._data()
+        r = analyze_churn(days, posts, None, tz, today=date(2026, 11, 13))  # 13-noyabr hali tugamagan
+        self.assertNotIn("2026-11-13", [s["date"] for s in r["spikes"]])
+
+    def test_card_rendered_in_tips(self):
+        from datetime import date
+        from telegram_analiz.churn import analyze_churn
+        from telegram_analiz.report import render_churn_card
+        days, posts, members, tz = self._data()
+        html_ = render_churn_card(analyze_churn(days, posts, members, tz, today=date(2026, 11, 30)))
+        for part in ("Nega obunachilar chiqib ketmoqda", "Nima topildi", "Ushlab qolish uchun", "Ko&#x27;p chiqish bo&#x27;lgan kunlar"
+                     if False else "Ko'p chiqish bo'lgan kunlar", "<td>13-noy</td><td>−90</td>", "href='https://t.me/ch/"):
+            self.assertIn(part, html_)
+        self.assertEqual(render_churn_card(None), "")

@@ -267,6 +267,8 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
 details.card summary{cursor:pointer;font-weight:600}details.card[open] summary{margin-bottom:10px}
 .setup{border-style:dashed}
+.churn{border-color:var(--bad)}.churn ol.tips-list{padding-left:22px}
+.churn-posts{font-size:13px;line-height:1.45;min-width:240px}
 .warn-card{border-color:var(--warn);color:var(--warn);font-weight:500;margin:10px 0 0}
 .tb-warn{font-weight:500}
 .kpi-btn{font:inherit;color:inherit;text-align:left;cursor:pointer;width:100%;display:block}
@@ -735,7 +737,7 @@ def _legacy_kpis(c: dict[str, Any], t: dict[str, Any], ch: dict[str, Any] | None
 
 def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
             compare: dict[str, Any] | None = None, web: bool = False, main_top_html: str = "",
-            plan_html: str = "") -> str:
+            plan_html: str = "", tips_top_html: str = "") -> str:
     """web=True (sayt): "Asosiy"/"Tavsiyalar" bo'limlari va KPI'lar ostida solishtirish davriga
     nisbatan o'zgarish (compare berilgan bo'lsa)."""
     c, t = r["chat"], r["totals"]
@@ -753,8 +755,8 @@ def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
         if web:
             body.append(_tabs_open(0, bool(plan_html)) + main_top_html + empty + "</section>")
             body.append(plan_html)
-            body.append("<section id='p-tips' role='tabpanel' aria-labelledby='tab-tips' hidden>"
-                        "<div class='card'><p class='muted'>Bu davr uchun tavsiya yo'q.</p></div></section>")
+            body.append("<section id='p-tips' role='tabpanel' aria-labelledby='tab-tips' hidden>" + tips_top_html
+                        + "<div class='card'><p class='muted'>Bu davr uchun post bo'yicha tavsiya yo'q.</p></div></section>")
             body.append(TABS_SCRIPT)
         else:
             body.append(main_top_html + empty)
@@ -864,7 +866,7 @@ def to_html(r: dict[str, Any], top_html: str = "", show_header: bool = True,
     if tabs:
         body.append("</section>")
         body.append(plan_html)
-        body.append(_tips_panel(ch))
+        body.append(_tips_panel(ch, tips_top_html))
         body.append(TABS_SCRIPT)
     body.append("<p class='muted'>telegram-analiz yordamida yaratildi.</p>")
     return _page(title, body)
@@ -1010,7 +1012,52 @@ fetch('/api/plan?month='+encodeURIComponent(ctx.month)+'&channel='+encodeURIComp
 })();</script>"""
 
 
-def _tips_panel(ch: dict[str, Any]) -> str:
+def render_churn_card(ins: dict[str, Any] | None) -> str:
+    """"Nega obunachilar chiqib ketmoqda" kartochkasi (Tavsiyalar bo'limi tepasida)."""
+    if not ins or not ins.get("avg_left"):
+        return ""
+    esc = html.escape
+    findings = ins.get("findings") or []
+    tips = ins.get("recommendations") or []
+    parts = ["<div class='card churn'><h2>Nega obunachilar chiqib ketmoqda</h2>",
+             f"<p class='muted'>Davrda {_n(ins['total_left'])} kishi chiqib ketgan, kuniga o'rtacha {ins['avg_left']:g}. "
+             "Telegram sababini aytmaydi — quyida chiqishlar postlar va qo'shilish vaqti bilan solishtirilgan "
+             "(bu bog'liqlik, isbot emas).</p>"]
+    if findings:
+        parts.append("<h3 class='aud-sub'>Nima topildi</h3><ul class='tips-list'>"
+                     + "".join(f"<li>{esc(f)}</li>" for f in findings) + "</ul>")
+    else:
+        parts.append("<p>Chiqishlarda aniq bir naqsh topilmadi: kunlik chiqishlar bir tekis, postlar bilan kuchli "
+                     "bog'liqlik yo'q.</p>")
+    parts.append("<h3 class='aud-sub'>Ushlab qolish uchun nima qilish kerak</h3><ol class='tips-list'>"
+                 + "".join(f"<li>{esc(t)}</li>" for t in tips) + "</ol>")
+    spikes = ins.get("spikes") or []
+    if spikes:
+        rows = []
+        for sp in spikes:
+            d = date_of(sp["date"])
+            posts = "<br>".join(
+                (f"<a href='{esc(p['link'])}' target='_blank' rel='noopener'>" if p.get("link") else "")
+                + esc(f"{p['time']} · {p['text'] or '[media]'}") + (" · sotuv" if p["promo"] else "")
+                + ("</a>" if p.get("link") else "") for p in sp["posts"]) or "<span class='muted'>post yo'q</span>"
+            rows.append(f"<tr><td>{d.day}-{_MONTHS_SHORT[d.month]}</td><td>−{_n(sp['left'])}</td>"
+                        f"<td>×{sp['times_avg']:g}</td><td class='churn-posts'>{posts}</td></tr>")
+        parts.append("<h3 class='aud-sub'>Ko'p chiqish bo'lgan kunlar</h3><div class='tw'><table><thead><tr>"
+                     "<th>Sana</th><th>Chiqdi</th><th>Odatdagidan</th><th>Oldingi kun va o'sha kungi postlar</th>"
+                     f"</tr></thead><tbody>{''.join(rows)}</tbody></table></div>")
+    extra = []
+    if ins.get("median_days_to_leave") is not None:
+        extra.append(f"chiqib ketganlar qo'shilgandan keyin o'rtacha (mediana) {ins['median_days_to_leave']:g} kunda ketgan")
+    peak = ins.get("leave_peak_hour")
+    if peak:
+        extra.append(f"eng ko'p chiqish soati — {peak['hour']:02d}:00 ({peak['n']} / {peak['of']})")
+    if extra:
+        parts.append("<p class='muted note'>Jurnal bo'yicha: " + esc("; ".join(extra)) + ".</p>")
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _tips_panel(ch: dict[str, Any], extra: str = "") -> str:
     """"Tavsiyalar" bo'limi: tavsiyalar ro'yxati va eng yaxshi vaqt jadvallari."""
     esc = html.escape
     tips = ch["recommendations"] or ["Bu davr uchun tavsiya topilmadi. Davrni kengaytirib ko'ring (masalan, 30 kun)."]
@@ -1022,6 +1069,7 @@ def _tips_panel(ch: dict[str, Any]) -> str:
     types = [r for r in ch["views_by_type"] if r["posts"] >= min(min_posts, 3)]
     parts = [
         "<section id='p-tips' role='tabpanel' aria-labelledby='tab-tips' hidden>",
+        extra,
         "<div class='card tips'><h2>Tavsiyalar</h2><ul class='tips-list'>"
         + "".join(f"<li>{esc(x)}</li>" for x in tips) + "</ul></div>",
         "<div class='two'>",

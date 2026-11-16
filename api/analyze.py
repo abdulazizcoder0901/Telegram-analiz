@@ -24,7 +24,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from telegram_analiz import admin_stats, audience, history, plan  # noqa: E402
+from telegram_analiz import admin_stats, audience, churn, history, plan  # noqa: E402
 from telegram_analiz.analyzer import analyze  # noqa: E402
 from telegram_analiz.filters import (  # noqa: E402
     MONTHS_FULL,
@@ -38,6 +38,7 @@ from telegram_analiz.filters import (  # noqa: E402
 from telegram_analiz.loader import ExportError  # noqa: E402
 from telegram_analiz.report import (  # noqa: E402
     CSS,
+    render_churn_card,
     render_followers_block,
     render_plan_panel,
     render_toolbar,
@@ -439,6 +440,14 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str, dict[str, str]]:
     result["data"] = {"fetched_at": int(fetched), "next_update": int(next_update)}
     followers_html, followers = followers_section(admin_entry, start, end, tz, channel, today)
 
+    # Tavsiyalar: nega obunachilar chiqib ketmoqda (kunlik chiqishlar + postlar + jurnal).
+    churn_ins = None
+    if followers and followers.get("days"):
+        churn_ins = churn.analyze_churn(followers["days"], filtered.messages,
+                                        ((admin_entry or {}).get("members") or {}).get("rows"), tz, today)
+        result["churn"] = {k: v for k, v in churn_ins.items() if k != "spikes"} | {
+            "spikes": [{k: v for k, v in sp.items() if k != "posts"} for sp in churn_ins.get("spikes", [])]}
+
     # Plan bo'limi uchun shu oyning avtomatik faktlari.
     plan_posts = analyze(filter_range(chat, plan_start, plan_end), top_n=1)
     plan_followers = None
@@ -523,7 +532,8 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str, dict[str, str]]:
         next_ts=int(next_update),
     )
     page = to_html(result, top_html=toolbar, show_header=False, compare=compare, web=True,
-                   main_top_html=followers_html, plan_html=render_plan_panel(plan_ctx))
+                   main_top_html=followers_html, plan_html=render_plan_panel(plan_ctx),
+                   tips_top_html=render_churn_card(churn_ins))
     return 200, "text/html; charset=utf-8", page, cache_headers
 
 
