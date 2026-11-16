@@ -128,6 +128,11 @@ qo'lda tuzatish mumkin; bo'sh `total` avtomatik hisobga qaytaradi.
 * **Chiqib ketganlar:** shu davrda qo'shilganlar (yangi auditoriya) / eski obunachilar (davrdan oldin
   qo'shilgan) / noma'lum.
 
+Oynalarda sanali **kunlar bo'yicha jadval** ham bor (har kuni nechta qo'shilgan/chiqib ketgan; jami — Telegram
+grafigidan, bo'linish — jurnaldan). Qo'shildi oynasida **"Qayerdan keldi"**: Telegram manbalari (havola,
+o'xshash kanallar, qidiruv, ...) jami va kunlar bo'yicha, hamda jurnal bo'yicha **taklif havolalari** (reklama
+uchun alohida nomli havola yaratilsa, qaysi reklama nechta obunachi keltirgani ko'rinadi).
+
 Manba — kanalning "So'nggi harakatlar" (admin log) jurnali: kim qachon qo'shilgan va chiqqan.
 Telegram uni faqat 48 soat saqlaydi, shuning uchun sayt jurnalni yig'ib, Upstash'da saqlab boradi
 (`tg:<kanal>:members`; obunachi ID'lari faqat HMAC-xesh ko'rinishida, ism/username saqlanmaydi).

@@ -33,6 +33,10 @@ def classify(members: dict[str, dict[str, list[str]]], start: date | None, end: 
     joined = {"new": 0, "returning": 0}
     joined_then_left = 0
     left = {"in_period": 0, "old": 0, "unknown": 0}
+    # Kunlar bo'yicha (sana → guruhlar soni), modal oynadagi jadval uchun.
+    joined_days: dict[str, dict[str, int]] = {}
+    join_sources: dict[str, int] = {}
+    left_days: dict[str, dict[str, int]] = {}
 
     for row in members.values():
         events = sorted([(_parse(t), "join") for t in row.get("j", [])] +
@@ -42,22 +46,36 @@ def classify(members: dict[str, dict[str, list[str]]], start: date | None, end: 
             if not in_range(day):
                 continue
             earlier = events[:i]
+            key = day.isoformat()
             if kind == "join":
-                joined["returning" if earlier else "new"] += 1
+                group = "returning" if earlier else "new"
+                joined[group] += 1
+                jd = joined_days.setdefault(key, {"new": 0, "returning": 0, "then_left": 0})
+                jd[group] += 1
+                src = (row.get("s") or {}).get(when.isoformat()) or (row.get("s") or {}).get(
+                    when.astimezone(timezone.utc).isoformat(timespec="seconds"))
+                if src:
+                    join_sources[src] = join_sources.get(src, 0) + 1
                 if any(k == "leave" for _, k in events[i + 1:]):
                     joined_then_left += 1
+                    jd["then_left"] += 1
             else:
                 last_join = next((w for w, k in reversed(earlier) if k == "join"), None)
                 if last_join is not None:
                     jday = last_join.astimezone(tz).date()
-                    left["in_period" if start is None or jday >= start else "old"] += 1
+                    group = "in_period" if start is None or jday >= start else "old"
                 elif since_day is not None and start is not None and since_day <= start:
-                    left["old"] += 1  # kuzatuvdan oldin (= davr boshidan oldin) qo'shilgan
+                    group = "old"  # kuzatuvdan oldin (= davr boshidan oldin) qo'shilgan
                 else:
-                    left["unknown"] += 1
+                    group = "unknown"
+                left[group] += 1
+                left_days.setdefault(key, {"in_period": 0, "old": 0, "unknown": 0})[group] += 1
 
     jt, lt = sum(joined.values()), sum(left.values())
     return {
+        "by_day": {"joined": dict(sorted(joined_days.items())), "left": dict(sorted(left_days.items()))},
+        "join_sources": [{"label": k, "n": v, "pct": _pct(v, sum(join_sources.values()))}
+                         for k, v in sorted(join_sources.items(), key=lambda kv: -kv[1])],
         "tracking_since": since_dt.astimezone(tz).isoformat(timespec="minutes") if since_dt else None,
         "complete": bool(since_day and start and since_day <= start),
         "joined": {

@@ -139,10 +139,14 @@ class MemberLog:
                 rows[u] = {"j": [], "l": []}
         changed = set()
         for e in events:
-            lst = rows[e["u"]]["j" if e["t"] == "join" else "l"]
+            row = rows[e["u"]]
+            lst = row["j" if e["t"] == "join" else "l"]
             if e["at"] not in lst:
                 lst.append(e["at"])
                 lst.sort()
+                changed.add(e["u"])
+            if e["t"] == "join" and e.get("s") and row.setdefault("s", {}).get(e["at"]) != e["s"]:
+                row["s"][e["at"]] = e["s"]  # qaysi havola orqali qo'shilgan
                 changed.add(e["u"])
         if changed:
             args: list[str] = []

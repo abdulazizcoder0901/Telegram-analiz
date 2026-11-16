@@ -266,6 +266,7 @@ def followers_section(entry: dict | None, start: date | None, end: date | None, 
     else:
         month_start = None
     sources = admin_stats.source_totals(entry["raw"] or {}, "new_followers_by_source_graph", start, end)
+    source_days = admin_stats.source_by_day(entry["raw"] or {}, "new_followers_by_source_graph", start, end)
     members = entry.get("members") or {}
     aud = None
     if members.get("rows") or members.get("since"):
@@ -278,7 +279,7 @@ def followers_section(entry: dict | None, start: date | None, end: date | None, 
     fetched = (f"olingan {_clock(entry.get('data_at') or entry['fetched'], tz)}" if entry.get("raw") else "")
     fetched += " · tarix saqlanmoqda" if entry.get("stored") and fetched else ""
     block = render_followers_block(summary=summary, raw=entry["raw"], sources=sources, error=error,
-                                   fetched_label=fetched, month_start=month_start)
+                                   fetched_label=fetched, month_start=month_start, source_days=source_days)
     return block, summary
 
 

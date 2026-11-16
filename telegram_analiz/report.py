@@ -276,6 +276,8 @@ details.card summary{cursor:pointer;font-weight:600}details.card[open] summary{m
 .aud-modal{width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto;padding:20px 22px;
 border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--fg);box-shadow:0 24px 60px -20px rgba(0,0,0,.55)}
 .aud-modal::backdrop{background:rgba(8,12,18,.55)}
+.aud-sub{font-size:14px;margin:18px 0 6px}
+.aud-modal td:not(:first-child),.aud-modal th:not(:first-child){text-align:right}
 .aud-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:6px}
 .aud-head h2{margin:0}.aud-head h2 .muted{font-weight:500;font-size:13px;margin-left:6px}
 .aud-close{flex:0 0 auto;width:34px;height:34px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font-size:20px;line-height:1;cursor:pointer}
@@ -284,7 +286,7 @@ border:1px solid var(--line);border-radius:14px;background:var(--card);color:var
 .aud-l{min-width:0}.aud-n{font:600 15px var(--font-num);font-variant-numeric:tabular-nums;text-align:right}
 .aud-p{font:500 14px var(--font-num);color:var(--muted);text-align:right}
 .aud-bar{height:8px;border-radius:999px;background:var(--chip);position:relative;overflow:hidden}
-.aud-bar i{position:absolute;inset:0 auto 0 0;border-radius:999px}.aud-bar.up i{background:var(--good)}.aud-bar.down i{background:var(--bad)}
+.aud-bar i{position:absolute;inset:0 auto 0 0;border-radius:999px}.aud-bar.acc i{background:var(--accent)}.aud-bar.up i{background:var(--good)}.aud-bar.down i{background:var(--bad)}
 .aud-extra{margin:10px 0 0;font-size:14px}.aud-extra b{font-family:var(--font-num)}
 @media (max-width:560px){.aud-row{grid-template-columns:minmax(0,1fr) auto 56px}.aud-bar{grid-column:1/-1}}
 .plan-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:18px 0 6px}
@@ -442,6 +444,7 @@ def render_followers_block(
     configured: bool = True,
     fetched_label: str = "",
     month_start: dict[str, Any] | None = None,
+    source_days: dict[str, dict[str, float]] | None = None,
 ) -> str:
     """Saytdagi "Obunachilar" bo'limi (Telegram admin statistikasi)."""
     from .admin_stats import _signed, _svg_diverging, _svg_line
@@ -519,7 +522,7 @@ def render_followers_block(
 
     parts = [head, "<div class='grid'>" + "".join(tile_html(*t) for t in tiles) + "</div>"]
     if aud:
-        parts.append(_audience_panels(aud, summary))
+        parts.append(_audience_panels(aud, summary, sources or [], source_days or {}))
 
     days = summary["days"]
     labels = [d["date"][8:10] + "." + d["date"][5:7] for d in days]
@@ -558,7 +561,43 @@ def render_followers_block(
     return "".join(parts)
 
 
-def _audience_panels(aud: dict[str, Any], summary: dict[str, Any]) -> str:
+def _sources_section(sources: list[tuple[str, float]], source_days: dict[str, dict[str, float]],
+                     join_sources: list[dict[str, Any]]) -> str:
+    """Qo'shildi oynasidagi "Qayerdan keldi": Telegram manbalari, kunlar bo'yicha va taklif havolalari."""
+    esc = html.escape
+    if not sources and not join_sources:
+        return ""
+    total = sum(v for _, v in sources) or 1
+    parts = ["<h3 class='aud-sub'>Qayerdan keldi</h3>"]
+    for name, v in sources:
+        pct = 100 * v / total
+        parts.append(f"<div class='aud-row'><span class='aud-l'>{esc(name)}</span><span class='aud-n'>{_n(int(v))}</span>"
+                     f"<span class='aud-p'>{pct:.1f}%</span><span class='aud-bar acc'><i style='width:{pct:.1f}%'></i></span></div>")
+    if source_days:
+        cols = [name for name, _ in sources][:4]
+        has_other = any(k not in cols for row in source_days.values() for k in row)
+        head = ["Sana"] + cols + (["Boshqa"] if has_other else [])
+        rows = []
+        for iso in sorted(source_days, reverse=True):
+            row = source_days[iso]
+            d = date_of(iso)
+            cells = [f"{d.day}-{_MONTHS_SHORT[d.month]}"] + [_n(int(row.get(c, 0))) for c in cols]
+            if has_other:
+                cells.append(_n(int(sum(v for k, v in row.items() if k not in cols))))
+            rows.append(cells)
+        parts.append("<h3 class='aud-sub'>Manbalar kunlar bo'yicha</h3>" + _table(head, rows))
+    if join_sources:
+        parts.append("<h3 class='aud-sub'>Taklif havolalari bo'yicha <span class='muted'>(jurnal)</span></h3>")
+        for g in join_sources:
+            parts.append(f"<div class='aud-row'><span class='aud-l'>{esc(g['label'])}</span><span class='aud-n'>{_n(g['n'])}</span>"
+                         f"<span class='aud-p'>{g['pct']:g}%</span><span class='aud-bar acc'><i style='width:{g['pct']}%'></i></span></div>")
+        parts.append("<p class='muted note'>Reklama uchun alohida taklif havolasi (nomi bilan) yaratilsa, qaysi reklama "
+                     "nechta obunachi olib kelgani shu yerda ko'rinadi.</p>")
+    return "".join(parts)
+
+
+def _audience_panels(aud: dict[str, Any], summary: dict[str, Any], sources: list[tuple[str, float]] | None = None,
+                     source_days: dict[str, dict[str, float]] | None = None) -> str:
     """"Qo'shildi" / "Chiqib ketdi" bosilganda ochiladigan panellar: guruhlar soni va foizi."""
     esc = html.escape
 
@@ -586,6 +625,32 @@ def _audience_panels(aud: dict[str, Any], summary: dict[str, Any]) -> str:
     then_left = j.get("then_left") or {}
     joined_extra = (f"<p class='aud-extra'>Shulardan keyin chiqib ketgan: <b>{_n(then_left.get('n', 0))}</b> "
                     f"({then_left.get('pct', 0):g}%)</p>") if j["total"] else ""
+    # Kunlar bo'yicha jadval: jami — Telegram grafigidan (to'liq), bo'linish — jurnaldan (bor kunlarda).
+    by_day = aud.get("by_day") or {}
+    days = list(reversed(summary.get("days") or []))
+
+    def day_label(iso: str) -> str:
+        d = date_of(iso)
+        return f"{d.day}-{_MONTHS_SHORT[d.month]}"
+
+    def cell(row: dict[str, int] | None, key: str) -> str:
+        return _n(row[key]) if row else "—"
+
+    joined_rows = [[day_label(r["date"]), "+" + _n(int(r["joined"])) if r["joined"] is not None else "—",
+                    cell(by_day.get("joined", {}).get(r["date"]), "new"),
+                    cell(by_day.get("joined", {}).get(r["date"]), "returning"),
+                    cell(by_day.get("joined", {}).get(r["date"]), "then_left")] for r in days]
+    left_rows = [[day_label(r["date"]), "−" + _n(int(r["left"])) if r["left"] is not None else "—",
+                  cell(by_day.get("left", {}).get(r["date"]), "in_period"),
+                  cell(by_day.get("left", {}).get(r["date"]), "old"),
+                  cell(by_day.get("left", {}).get(r["date"]), "unknown")] for r in days]
+    table_note = ("<p class='muted note'>Har kunning jami soni — Telegram statistikasidan; qolgan ustunlar — "
+                  "jurnal bo'yicha (\"—\" — o'sha kun uchun jurnal yo'q).</p>")
+    joined_table = ("<h3 class='aud-sub'>Kunlar bo'yicha</h3>" + _table(
+        ["Sana", "Qo'shildi", "Birinchi marta", "Qaytgan", "Keyin chiqib ketgan"], joined_rows) + table_note) if days else ""
+    left_table = ("<h3 class='aud-sub'>Kunlar bo'yicha</h3>" + _table(
+        ["Sana", "Chiqib ketdi", "Shu davrda qo'shilgan", "Eski", "Noma'lum"], left_rows) + table_note) if days else ""
+
     def dialog(dlg_id: str, title: str, total: int, body: str) -> str:
         return (
             f"<dialog id='{dlg_id}' class='aud-modal' aria-labelledby='{dlg_id}-t'>"
@@ -595,8 +660,9 @@ def _audience_panels(aud: dict[str, Any], summary: dict[str, Any]) -> str:
         )
 
     return (
-        dialog("aud-joined", "Qo'shilganlar: kimlar?", j["total"], rows(j["groups"], "up") + joined_extra)
-        + dialog("aud-left", "Chiqib ketganlar: eski yoki yangi?", lf["total"], rows(lf["groups"], "down"))
+        dialog("aud-joined", "Qo'shilganlar: kimlar?", j["total"], rows(j["groups"], "up") + joined_extra
+               + _sources_section(sources or [], source_days or {}, aud.get("join_sources") or []) + joined_table)
+        + dialog("aud-left", "Chiqib ketganlar: eski yoki yangi?", lf["total"], rows(lf["groups"], "down") + left_table)
         + AUDIENCE_SCRIPT
     )
 

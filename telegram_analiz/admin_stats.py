@@ -43,6 +43,21 @@ def member_hash(user_id: int, key: str | None) -> str:
     return _hmac.new(secret, str(user_id).encode(), hashlib.sha256).hexdigest()[:16]
 
 
+def join_source(action: Any) -> str:
+    """Qo'shilish qayerdan bo'lgani: taklif havolasi nomi (yoki havolaning o'zi), ochiq havola, admin."""
+    invite = getattr(action, "invite", None)
+    if invite is not None:
+        title = (getattr(invite, "title", None) or "").strip()
+        link = (getattr(invite, "link", None) or "").strip()
+        name = title or (link.replace("https://", "") if link else "taklif havolasi")
+        if type(action).__name__.endswith("JoinByRequest"):
+            name += " (so'rov orqali)"
+        return f"Taklif havolasi: {name}"[:80]
+    if type(action).__name__.endswith("ParticipantInvite"):
+        return "Admin qo'shgan"
+    return "Ochiq havola / qidiruv (@username)"
+
+
 async def _member_events(client, entity, hash_key: str | None) -> list[dict[str, str]]:
     """Admin log'dagi qo'shilish/chiqish hodisalari (Telegram oxirgi 48 soatni saqlaydi)."""
     from telethon import types
@@ -54,15 +69,20 @@ async def _member_events(client, entity, hash_key: str | None) -> list[dict[str,
     events = []
     async for ev in client.iter_admin_log(entity, join=True, leave=True, invite=True):
         action = ev.original.action
+        source = None
         if isinstance(action, types.ChannelAdminLogEventActionParticipantLeave):
             kind = "leave"
         elif isinstance(action, join_types):
             kind = "join"
+            source = join_source(action)
         else:
             continue
         when = ev.date if ev.date.tzinfo else ev.date.replace(tzinfo=timezone.utc)
-        events.append({"u": member_hash(ev.user_id, hash_key), "t": kind,
-                       "at": when.astimezone(timezone.utc).isoformat(timespec="seconds")})
+        item = {"u": member_hash(ev.user_id, hash_key), "t": kind,
+                "at": when.astimezone(timezone.utc).isoformat(timespec="seconds")}
+        if source:
+            item["s"] = source
+        events.append(item)
     return events
 
 
@@ -212,6 +232,38 @@ def daily_series(raw: dict[str, Any]) -> dict[date, dict[str, float | None]]:
     return dict(sorted(series.items()))
 
 
+SOURCE_LABELS = {
+    "url": "Havola (t.me)",
+    "similar channels": "O'xshash kanallar tavsiyasi",
+    "search": "Qidiruv",
+    "pm": "Shaxsiy xabar",
+    "channels": "Boshqa kanallar",
+    "groups": "Guruhlar",
+    "ads": "Telegram reklamasi",
+    "other": "Boshqa",
+}
+
+
+def source_label(name: str) -> str:
+    return SOURCE_LABELS.get(str(name).strip().lower(), str(name))
+
+
+def source_by_day(raw: dict[str, Any], graph_name: str, start: date | None, end: date | None) -> dict[str, dict[str, float]]:
+    """Manba grafigi kunlar bo'yicha: {"2026-11-15": {"Qidiruv": 3, ...}} (nomlar o'zbekcha)."""
+    graph = (raw.get("graphs") or {}).get(graph_name)
+    if not graph:
+        return {}
+    days, cols, names = _columns(graph)
+    out: dict[str, dict[str, float]] = {}
+    for key, values in cols.items():
+        label = source_label(names.get(key, key))
+        for d, v in zip(days, values):
+            if v and (not start or d >= start) and (not end or d <= end):
+                row = out.setdefault(d.isoformat(), {})
+                row[label] = row.get(label, 0) + v
+    return dict(sorted(out.items()))
+
+
 def source_totals(raw: dict[str, Any], graph_name: str, start: date | None, end: date | None) -> list[tuple[str, float]]:
     """Manba grafigidagi (masalan new_followers_by_source_graph) har bir manba yig'indisi."""
     graph = (raw.get("graphs") or {}).get(graph_name)
@@ -222,7 +274,7 @@ def source_totals(raw: dict[str, Any], graph_name: str, start: date | None, end:
     for key, values in cols.items():
         total = sum(v or 0 for d, v in zip(days, values) if (not start or d >= start) and (not end or d <= end))
         if total:
-            totals.append((names.get(key, key), total))
+            totals.append((source_label(names.get(key, key)), total))
     return sorted(totals, key=lambda kv: -kv[1])
 
 

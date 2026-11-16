@@ -487,7 +487,7 @@ class FollowersTests(unittest.TestCase):
         text = _h.unescape(body)
         for label in ("Obunachilar", "Oy boshida", "Qo'shildi", "Chiqib ketdi", "Sof o'zgarish",
                       "Bildirishnoma yoqilgan", "Post boshiga ko'rish", "Har kuni qo'shilgan va chiqib ketgan",
-                      "Kunlar bo'yicha jadval", "Yangi obunachilar qayerdan keldi", "Search"):
+                      "Kunlar bo'yicha jadval", "Yangi obunachilar qayerdan keldi", "Qidiruv"):
             self.assertIn(label, text)
         self.assertIn("−55 (1.04%)", text)  # Telegram'dagidek o'zgarish
         main_part = body.split("<section id='p-main'")[1]
@@ -693,6 +693,11 @@ class AudienceTests(unittest.TestCase):
         self.assertEqual((r["left"]["total"], lf), (3, {"in_period": 1, "old": 2, "unknown": 0}))
         self.assertTrue(r["complete"])
         self.assertEqual(sum(g["pct"] for g in r["left"]["groups"]), 100.0)
+        # kunlar bo'yicha: "f" UTC+5 da 1-noyabr, "a" 3-noyabrda qo'shilib 6-noyabrda chiqqan
+        self.assertEqual(r["by_day"]["joined"]["2026-11-01"], {"new": 1, "returning": 0, "then_left": 0})
+        self.assertEqual(r["by_day"]["joined"]["2026-11-03"], {"new": 1, "returning": 0, "then_left": 1})
+        self.assertEqual(r["by_day"]["left"]["2026-11-06"], {"in_period": 1, "old": 0, "unknown": 0})
+        self.assertEqual(sum(v["old"] for v in r["by_day"]["left"].values()), 2)
         # kuzatuv davr o'rtasida boshlangan bo'lsa — join yozuvisiz chiqqan "noma'lum"
         r2 = classify(members, date(2026, 11, 1), date(2026, 11, 30), "2026-11-03T00:00:00+00:00", tz)
         self.assertEqual({g["key"]: g["n"] for g in r2["left"]["groups"]}["unknown"], 1)
@@ -766,6 +771,13 @@ class AudiencePanelTests(unittest.TestCase):
         self.assertIn("<dialog id='aud-left' class='aud-modal'", block)  # modal oyna, sahifa ichida emas
         self.assertIn("aria-haspopup='dialog'", block)
         self.assertIn("Shu davrda qo&#x27;shilganlar (yangi auditoriya)", block)
+        # modal oynalarda sanali kunlik jadval
+        joined_dlg = block.split("<dialog id='aud-joined'")[1].split("</dialog>")[0]
+        left_dlg = block.split("<dialog id='aud-left'")[1].split("</dialog>")[0]
+        self.assertIn("<th>Sana</th>", joined_dlg)
+        self.assertIn("<td>31-okt</td><td>+", joined_dlg)
+        self.assertIn("<td>12-okt</td><td>−", left_dlg)
+        self.assertLess(left_dlg.index("31-okt"), left_dlg.index("1-okt<"))  # yangi kunlar tepada
         self.assertNotIn("a1", json.dumps(js["followers"]))  # xesh ham sahifaga chiqmaydi
         self.assertIn("[hidden]{display:none!important}", body)  # yashirin forma/panellar ko'rinmasin
 
@@ -841,3 +853,66 @@ class AdminLockTests(unittest.TestCase):
         self.assertIsNone(mod.admin_stale_warning(fresh, date(2026, 11, 16)))
         self.assertIsNone(mod.admin_stale_warning(None, date(2026, 11, 16)))
         self.assertIn("ma'lumot bermayapti", mod.admin_stale_warning(dict(entry, fetch_error=None), date(2026, 11, 16)))
+
+
+class SourceTests(unittest.TestCase):
+    def test_labels_and_by_day(self):
+        from datetime import date
+        from telegram_analiz.admin_stats import source_by_day, source_label, source_totals
+        raw, *_ = _fake_admin_stats()
+        xs = raw["graphs"]["followers_graph"]["columns"][0]
+        raw["graphs"]["new_followers_by_source_graph"] = {
+            "columns": [xs, ["y0", *[3] * (len(xs) - 1)], ["y1", *[1] * (len(xs) - 1)]],
+            "names": {"y0": "URL", "y1": "Similar Channels"}}
+        self.assertEqual(source_label("Search"), "Qidiruv")
+        self.assertEqual(source_label("Yangi manba"), "Yangi manba")
+        tot = dict(source_totals(raw, "new_followers_by_source_graph", date(2026, 10, 1), date(2026, 10, 31)))
+        self.assertEqual(tot, {"Havola (t.me)": 93, "O'xshash kanallar tavsiyasi": 31})
+        days = source_by_day(raw, "new_followers_by_source_graph", date(2026, 10, 30), date(2026, 10, 31))
+        self.assertEqual(days, {"2026-10-30": {"Havola (t.me)": 3, "O'xshash kanallar tavsiyasi": 1},
+                                "2026-10-31": {"Havola (t.me)": 3, "O'xshash kanallar tavsiyasi": 1}})
+
+    def test_join_source_from_admin_log(self):
+        from types import SimpleNamespace
+        from telegram_analiz.admin_stats import join_source
+
+        class ChannelAdminLogEventActionParticipantJoinByInvite(SimpleNamespace):
+            pass
+
+        class ChannelAdminLogEventActionParticipantJoinByRequest(SimpleNamespace):
+            pass
+
+        class ChannelAdminLogEventActionParticipantJoin(SimpleNamespace):
+            pass
+        inv = SimpleNamespace(title="Instagram reklama", link="https://t.me/+AbC")
+        self.assertEqual(join_source(ChannelAdminLogEventActionParticipantJoinByInvite(invite=inv)),
+                         "Taklif havolasi: Instagram reklama")
+        self.assertEqual(join_source(ChannelAdminLogEventActionParticipantJoinByRequest(
+            invite=SimpleNamespace(title="", link="https://t.me/+XyZ"))), "Taklif havolasi: t.me/+XyZ (so'rov orqali)")
+        self.assertEqual(join_source(ChannelAdminLogEventActionParticipantJoin()), "Ochiq havola / qidiruv (@username)")
+
+    def test_join_sources_stored_and_classified(self):
+        from datetime import date, timedelta, timezone
+        from telegram_analiz.audience import classify
+        from telegram_analiz.history import HistoryStore, MemberLog
+        log = MemberLog(HistoryStore("https://x", "t", opener=FakeRedis()))
+        log.record("ch", [{"u": "a", "t": "join", "at": "2026-11-14T10:00:00+00:00", "s": "Taklif havolasi: Reklama 1"},
+                          {"u": "b", "t": "join", "at": "2026-11-14T11:00:00+00:00", "s": "Taklif havolasi: Reklama 1"},
+                          {"u": "c", "t": "join", "at": "2026-11-15T11:00:00+00:00", "s": "Ochiq havola / qidiruv (@username)"}],
+                   "2026-11-16T00:00:00+00:00")
+        members, since = log.load("ch")
+        r = classify(members, date(2026, 11, 1), date(2026, 11, 30), since, timezone(timedelta(hours=5)))
+        self.assertEqual(r["join_sources"][0], {"label": "Taklif havolasi: Reklama 1", "n": 2, "pct": 66.7})
+
+    def test_modal_shows_sources(self):
+        from unittest import mock
+        from telegram_analiz.history import HistoryStore
+        mod, env, raw = FollowersTests._api(FollowersTests())
+        raw["member_events"] = [{"u": "a1", "t": "join", "at": "2026-10-10T05:00:00+00:00", "s": "Taklif havolasi: Reklama"}]
+        fake = FakeRedis()
+        with env, mock.patch.object(mod.history, "store_from_env", lambda *a: HistoryStore("https://x", "t", opener=fake)):
+            _, _, body, _ = mod.run({"month": ["2026-10"]})
+        dlg = body.split("<dialog id='aud-joined'")[1].split("</dialog>")[0]
+        for text in ("Qayerdan keldi", "Qidiruv", "Manbalar kunlar bo'yicha", "Taklif havolasi: Reklama"):
+            self.assertIn(text, dlg)
+        self.assertIn("<td>31-okt</td>", dlg.split("Manbalar kunlar")[1])
