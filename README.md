@@ -100,6 +100,12 @@ python -m telegram_analiz.make_session
 4. Tarixni saqlash uchun (ixtiyoriy, tavsiya etiladi): Vercel → **Storage → Create Database →
    Upstash for Redis** (bepul) → loyihaga ulang. Kunlik raqamlar shu bazaga yozib boriladi.
 
+Telegram bitta sessiya kaliti bir vaqtda bir nechta serverdan ishlatilsa uni bekor qiladi. Shuning uchun
+Telegram'ga faqat qulfni (`tg:<kanal>:admin_lock`, 90 soniya) olgan server nusxasi ulanadi, natija bazada
+umumiy saqlanadi (`tg:<kanal>:admin_raw`) va qolgan nusxalar shuni ishlatadi. Statistika yangilanmay
+qolsa (masalan, sessiya bekor qilingan bo'lsa), sahifa tepasida sariq ogohlantirish chiqadi; unda
+`make_session` bilan yangi `TG_SESSION` yaratib, Vercel'da almashtiring va qayta deploy qiling.
+
 `TG_SESSION` akkauntingizga kirish kalitidir: hech kimga bermang. Bekor qilish: Telegram →
 Sozlamalar → Qurilmalar → "Junior Telegram dashboard" → Tugatish.
 

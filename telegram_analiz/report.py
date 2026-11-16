@@ -267,6 +267,8 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
 details.card summary{cursor:pointer;font-weight:600}details.card[open] summary{margin-bottom:10px}
 .setup{border-style:dashed}
+.warn-card{border-color:var(--warn);color:var(--warn);font-weight:500;margin:10px 0 0}
+.tb-warn{font-weight:500}
 .kpi-btn{font:inherit;color:inherit;text-align:left;cursor:pointer;width:100%;display:block}
 .kpi-btn:hover{border-color:var(--accent)}
 .kpi-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -452,9 +454,12 @@ def render_followers_block(
                 "Telegram admin statistikasidan olinadi va hali ulanmagan. Vercel'ga <b>TG_API_ID</b>, "
                 "<b>TG_API_HASH</b> va <b>TG_SESSION</b> qo'shilgach shu yerda chiqadi (README: "
                 "“Obunachilar statistikasi”).</p></div></section>")
+    alert = f"<div class='card warn-card' role='alert'>{esc(error)}</div>" if error else ""
     if summary is None:
-        msg = error or "Bu davr uchun Telegram statistikasi yo'q."
-        return head + f"<div class='card'><p class='muted'>{esc(msg)}</p></div></section>"
+        if alert:
+            return head + alert + "</section>"
+        return head + "<div class='card'><p class='muted'>Bu davr uchun Telegram statistikasi yo'q.</p></div></section>"
+    head += alert
 
     def num(v):
         return _n(int(v)) if v is not None else "—"
@@ -548,8 +553,6 @@ def render_followers_block(
                      f"{raw['period']['min'][:10]} — {raw['period']['max'][:10]}, oldingi shuncha kunga nisbatan.")
     if fetched_label:
         notes.append(f"Telegram admin statistikasi · {fetched_label}")
-    if error:
-        notes.append(error)
     parts.append("".join(f"<p class='muted note'>{esc(n)}</p>" for n in notes))
     parts.append("</section><h2 class='sec'>Postlar</h2>")
     return "".join(parts)

@@ -72,47 +72,88 @@ def fetch_admin(channel: str) -> dict:
                                    os.environ["TG_SESSION"], timeout=ADMIN_TIMEOUT)
 
 
+ADMIN_LOCK_SECONDS = 90  # shu vaqt ichida Telegram'ga faqat bitta nusxa ulanadi
+
+
 def admin_data(channel: str, min_fetched: float) -> dict | None:
-    """Admin statistikasi + saqlangan tarix. Sozlanmagan bo'lsa None."""
+    """Admin statistikasi + saqlangan tarix. Sozlanmagan bo'lsa None.
+
+    Bitta sessiya kaliti bir vaqtda bir nechta serverdan ishlatilsa, Telegram uni bekor qiladi.
+    Shuning uchun natija bazada umumiy saqlanadi (``tg:<kanal>:admin_raw``) va Telegram'ga faqat
+    qulfni (``tg:<kanal>:admin_lock``) olgan nusxa ulanadi; qolganlari umumiy nusxani ishlatadi.
+    """
     if not admin_configured():
         return None
     entry = _ADMIN.get(channel)
     if entry and entry["fetched"] >= min_fetched:
         return entry
+    previous = entry or {}
     store = history.store_from_env()
+    js = history.JSONStore(store) if store else None
+    shared_key, lock_key = f"tg:{channel}:admin_raw", f"tg:{channel}:admin_lock"
     stored: dict = {}
     store_error = None
+    shared: dict = {}
     if store:
         try:
             stored = store.load(channel)
         except Exception as exc:  # noqa: BLE001
             store_error = f"Tarixni o'qib bo'lmadi: {exc}"
-    try:
-        raw = fetch_admin(channel)
-        fresh = admin_stats.daily_series(raw)
+        try:
+            shared = js.get(shared_key) or {}
+        except Exception as exc:  # noqa: BLE001
+            print(f"[admin] umumiy keshni o'qib bo'lmadi: {exc}", flush=True)
+
+    now = time.time()
+    raw = shared.get("raw") or previous.get("raw")
+    data_at = shared.get("fetched") or previous.get("data_at")
+    fetch_error = shared.get("error")
+    attempted = shared.get("attempt") or 0
+    new_events = False
+
+    if attempted < min_fetched:
+        locked = True
         if store:
             try:
-                store.save(channel, fresh)
-            except Exception as exc:  # noqa: BLE001
-                store_error = f"Tarixni saqlab bo'lmadi: {exc}"
-        entry = {"fetched": time.time(), "raw": raw, "series": history.merge(stored, fresh),
-                 "error": store_error, "stored": bool(store)}
-        print(f"[admin] ok: telegram {len(fresh)} kun, saqlangan {len(stored)} kun, "
-              f"obunachilar {(raw.get('followers') or {}).get('current')}, baza {'bor' if store else 'yoq'}"
-              + (f", baza xatosi: {store_error}" if store_error else ""), flush=True)
-    except Exception as exc:  # noqa: BLE001 — statistika xatosi dashboardni to'xtatmasin
-        previous = entry or {}
-        entry = {"fetched": time.time(), "raw": previous.get("raw"),
-                 "series": history.merge(stored, previous.get("series") or {}),
-                 "error": f"Telegram statistikasini olib bo'lmadi: {exc}", "stored": bool(store)}
-        print(f"[admin] xato: {type(exc).__name__}: {exc}", flush=True)
+                locked = store._command("SET", lock_key, str(int(now)), "NX", "EX", str(ADMIN_LOCK_SECONDS)) == "OK"
+            except Exception:  # noqa: BLE001 — baza ishlamasa qulfsiz davom etamiz
+                locked = True
+        if locked:
+            attempted = now
+            try:
+                raw = fetch_admin(channel)
+                data_at, fetch_error, new_events = now, None, True
+                fresh = admin_stats.daily_series(raw)
+                if store:
+                    try:
+                        store.save(channel, fresh)
+                    except Exception as exc:  # noqa: BLE001
+                        store_error = f"Tarixni saqlab bo'lmadi: {exc}"
+                print(f"[admin] ok: telegram {len(fresh)} kun, saqlangan {len(stored)} kun, "
+                      f"obunachilar {(raw.get('followers') or {}).get('current')}, baza {'bor' if store else 'yoq'}"
+                      + (f", baza xatosi: {store_error}" if store_error else ""), flush=True)
+            except Exception as exc:  # noqa: BLE001 — statistika xatosi dashboardni to'xtatmasin
+                fetch_error = f"Telegram statistikasini olib bo'lmadi: {exc}"
+                print(f"[admin] xato: {type(exc).__name__}: {exc}", flush=True)
+            if js:
+                try:
+                    js.set(shared_key, {"attempt": attempted, "fetched": data_at, "raw": raw, "error": fetch_error})
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[admin] umumiy keshga yozib bo'lmadi: {exc}", flush=True)
+        else:
+            print("[admin] boshqa nusxa Telegram'ga ulanmoqda — umumiy nusxa ishlatiladi", flush=True)
+
+    fresh = admin_stats.daily_series(raw) if raw else {}
+    series = history.merge(history.merge(stored, previous.get("series") or {}), fresh)
+    entry = {"fetched": attempted or now, "data_at": data_at, "raw": raw, "series": series,
+             "error": fetch_error or store_error, "fetch_error": fetch_error, "stored": bool(store)}
     # Obunachilar jurnali (qo'shilish/chiqish vaqtlari) — yangi/eski auditoriyani ajratish uchun.
     entry.setdefault("members", previous_members(channel))
     if store:
         log = history.MemberLog(store)
         try:
             events = (entry.get("raw") or {}).get("member_events") or []
-            if entry.get("raw") is not None and "member_events" in entry["raw"]:
+            if new_events and "member_events" in entry["raw"]:
                 log.record(channel, events, datetime.now(timezone.utc).isoformat(timespec="seconds"))
             members, since = log.load(channel)
             entry["members"] = {"rows": members, "since": since}
@@ -120,6 +161,26 @@ def admin_data(channel: str, min_fetched: float) -> dict | None:
             print(f"[members] xato: {type(exc).__name__}: {exc}", flush=True)
     _ADMIN[channel] = entry
     return entry
+
+
+def admin_stale_warning(entry: dict | None, today: date) -> str | None:
+    """Obunachilar statistikasi yangilanmay qolgan bo'lsa — tepada ko'rinadigan ogohlantirish."""
+    if entry is None:
+        return None
+    days = [d for d, v in (entry.get("series") or {}).items()
+            if v.get("joined") is not None or v.get("total") is not None]
+    last = max(days, default=None)
+    err = entry.get("fetch_error")
+    if not err and last is not None and (today - last).days <= 2:
+        return None
+    since = f"{format_range(last, last, today)} dan beri " if last else ""
+    if err and "sessiyasi yaroqsiz" in err:
+        reason = "Telegram sessiyasi yaroqsiz — TG_SESSION ni yangilash kerak (README: make_session)."
+    elif err:
+        reason = err
+    else:
+        reason = "Telegram yangi kunlar uchun ma'lumot bermayapti."
+    return f"Obunachilar statistikasi {since}yangilanmayapti: {reason}"
 
 
 def previous_members(channel: str) -> dict:
@@ -214,7 +275,8 @@ def followers_section(entry: dict | None, start: date | None, end: date | None, 
         aud["log_error"] = (entry.get("raw") or {}).get("member_events_error")
         if summary is not None:
             summary = dict(summary, audience=aud)
-    fetched = f"olingan {_clock(entry['fetched'], tz)}" + (" · tarix saqlanmoqda" if entry.get("stored") else "")
+    fetched = (f"olingan {_clock(entry.get('data_at') or entry['fetched'], tz)}" if entry.get("raw") else "")
+    fetched += " · tarix saqlanmoqda" if entry.get("stored") and fetched else ""
     block = render_followers_block(summary=summary, raw=entry["raw"], sources=sources, error=error,
                                    fetched_label=fetched, month_start=month_start)
     return block, summary
@@ -420,6 +482,9 @@ def run(query: dict[str, list[str]]) -> tuple[int, str, str, dict[str, str]]:
     cov = coverage_warning(chat, filters, today, complete=entry["complete"])
     if cov:
         warnings.append(cov)
+    stale = admin_stale_warning(admin_entry, today)
+    if stale:
+        warnings.append(stale)
 
     base = {"tz": tz_raw}
     if channel != DEFAULT_CHANNEL:

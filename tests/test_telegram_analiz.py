@@ -595,6 +595,7 @@ class FrozenMonthStartTests(unittest.TestCase):
             # Telegram eski kunlarni "tuzatdi": barcha jami sonlar 40 ga kamaydi
             growth = raw["graphs"]["growth_graph"]["columns"][1]
             raw["graphs"]["growth_graph"]["columns"][1] = [growth[0]] + [v - 40 for v in growth[1:]]
+            fake.data.pop("tg:junior_academy:admin_lock", None)  # qulf muddati (90 soniya) o'tdi
             _, _, js, _ = mod.run({"month": ["2026-10"], "format": ["json"], "refresh": ["1"]})
             # refresh 302 qaytaradi; keyingi so'rov yangi ma'lumot bilan
             _, _, js, _ = mod.run({"month": ["2026-10"], "format": ["json"]})
@@ -767,3 +768,76 @@ class AudiencePanelTests(unittest.TestCase):
         self.assertIn("Shu davrda qo&#x27;shilganlar (yangi auditoriya)", block)
         self.assertNotIn("a1", json.dumps(js["followers"]))  # xesh ham sahifaga chiqmaydi
         self.assertIn("[hidden]{display:none!important}", body)  # yashirin forma/panellar ko'rinmasin
+
+
+class AdminLockTests(unittest.TestCase):
+    """Telegram'ga bir vaqtda faqat bitta nusxa ulanishi va eskirgan statistika ogohlantirishi."""
+
+    def _two_instances(self):
+        from unittest import mock
+        from telegram_analiz.history import HistoryStore
+        fake = FakeRedis()
+        calls = {"n": 0}
+        mods = []
+        for _ in range(2):
+            mod, env, raw = FollowersTests._api(FollowersTests())
+
+            def fetch(channel, raw=raw):
+                calls["n"] += 1
+                return raw
+            mod.fetch_admin = fetch
+            mods.append(mod)
+        patches = [mock.patch.object(m.history, "store_from_env",
+                                     lambda *a: HistoryStore("https://x", "t", opener=fake)) for m in mods]
+        return mods, env, patches, fake, calls
+
+    def test_second_instance_uses_shared_copy(self):
+        (a, b), env, patches, fake, calls = self._two_instances()
+        with env, patches[0], patches[1]:
+            a.run({"month": ["2026-10"]})
+            self.assertEqual(calls["n"], 1)
+            self.assertIn("tg:junior_academy:admin_raw", fake.data)
+            _, _, js, _ = b.run({"month": ["2026-10"], "format": ["json"]})  # boshqa server nusxasi
+            self.assertEqual(calls["n"], 1, "ikkinchi nusxa Telegram'ga ulanmasligi kerak")
+            self.assertEqual(json.loads(js)["followers"]["joined"], 373)
+
+    def test_lock_blocks_concurrent_fetch_then_allows_after_expiry(self):
+        (a, b), env, patches, fake, calls = self._two_instances()
+        with env, patches[0], patches[1]:
+            a.run({"month": ["2026-10"]})
+            # "Yangilash": yangi ma'lumot kerak, lekin qulf hali band → ulanmaydi, umumiy nusxa ishlatiladi
+            status, _, _, _ = b.run({"month": ["2026-10"], "refresh": ["1"]})
+            self.assertEqual((status, calls["n"]), (302, 1))
+            fake.data.pop("tg:junior_academy:admin_lock")  # 90 soniya o'tdi
+            b._ADMIN.clear()
+            b.run({"month": ["2026-10"], "refresh": ["2"]})
+            self.assertEqual(calls["n"], 2)
+
+    def test_failed_session_shows_visible_warning_and_is_not_retried_by_others(self):
+        (a, b), env, patches, fake, calls = self._two_instances()
+
+        def dead(channel):
+            calls["n"] += 1
+            raise ExportError("Telegram sessiyasi yaroqsiz yoki bekor qilingan. make_session bilan yangi TG_SESSION yarating.")
+        a.fetch_admin = b.fetch_admin = dead
+        with env, patches[0], patches[1]:
+            _, _, body, _ = a.run({"month": ["2026-10"]})
+            _, _, body_b, _ = b.run({"month": ["2026-10"]})
+        self.assertEqual(calls["n"], 1)  # ikkinchi nusxa o'lik sessiya bilan qayta urinmaydi
+        for page in (body, body_b):
+            self.assertIn("Obunachilar statistikasi yangilanmayapti: Telegram sessiyasi yaroqsiz", page)
+            self.assertIn("class='tb-warn'", page)
+            self.assertIn("class='card warn-card' role='alert'", page)
+
+    def test_stale_warning_names_last_day(self):
+        from datetime import date
+        mod = _load_api()
+        entry = {"series": {date(2026, 11, 12): {"total": 5940, "joined": 31, "left": 20}},
+                 "fetch_error": "Telegram statistikasini olib bo'lmadi: Telegram sessiyasi yaroqsiz yoki bekor qilingan."}
+        msg = mod.admin_stale_warning(entry, date(2026, 11, 16))
+        self.assertIn("12-noy dan beri yangilanmayapti", msg)
+        self.assertIn("TG_SESSION ni yangilash kerak", msg)
+        fresh = {"series": {date(2026, 11, 15): {"total": 1, "joined": 1, "left": 0}}, "fetch_error": None}
+        self.assertIsNone(mod.admin_stale_warning(fresh, date(2026, 11, 16)))
+        self.assertIsNone(mod.admin_stale_warning(None, date(2026, 11, 16)))
+        self.assertIn("ma'lumot bermayapti", mod.admin_stale_warning(dict(entry, fetch_error=None), date(2026, 11, 16)))
